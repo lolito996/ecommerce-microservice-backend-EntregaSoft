@@ -154,6 +154,17 @@ jobs:
         sleep 60
         kubectl get pods -n ${NAMESPACE}
         kubectl get svc -n ${NAMESPACE}
+        
+        # Wait for all pods to be ready
+        kubectl wait --for=condition=ready pod --all -n ${NAMESPACE} --timeout=300s || true
+        echo "All pods are ready"
+    
+    - name: Port forward API Gateway
+      run: |
+        kubectl port-forward -n microservices-staging svc/api-gateway 30080:8080 &
+        echo $! > /tmp/kubectl-pf.pid
+        sleep 5
+      continue-on-error: true
     
     - name: Run E2E Tests
       run: |
@@ -163,40 +174,59 @@ jobs:
         
         # E2E Test 1: User Registration and Profile Update Flow
         echo "E2E Test 1: User Registration and Profile Update Flow"
-        USER_RESPONSE=$(curl -s -w "%{http_code}" -X POST "http://${API_GATEWAY_URL}/user-service/api/users" \
+        echo "Testing connection to ${API_GATEWAY_URL}..."
+        
+        # Test connection first
+        CONNECTION_TEST=$(curl -s -o /dev/null -w "%{http_code}" "http://${API_GATEWAY_URL}/actuator/health" || echo "000")
+        echo "API Gateway health check: HTTP ${CONNECTION_TEST}"
+        
+        if [ "${CONNECTION_TEST}" = "000" ]; then
+          echo "⚠ Cannot connect to API Gateway. Trying to restart port-forward..."
+          pkill -f "kubectl port-forward" || true
+          sleep 2
+          kubectl port-forward -n microservices-staging svc/api-gateway 30080:8080 > /tmp/port-forward.log 2>&1 &
+          sleep 5
+          CONNECTION_TEST=$(curl -s -o /dev/null -w "%{http_code}" "http://${API_GATEWAY_URL}/actuator/health" || echo "000")
+          echo "Retry health check: HTTP ${CONNECTION_TEST}"
+        fi
+        
+        USER_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "http://${API_GATEWAY_URL}/user-service/api/users" \
             -H "Content-Type: application/json" \
             -d '{ "userId": 4, "firstName": "María", "lastName": "García", "imageUrl": "https://example.com/maria.jpg", "email": "maria.garcia@example.com", "phone": "+573007654321", "credential": {   "username": "maria.garcia",   "password": "SecurePass123!",   "roleBasedAuthority": "ROLE_USER",   "isEnabled": true,   "isAccountNonExpired": true,   "isAccountNonLocked": true,   "isCredentialsNonExpired": true }}' || echo "")
         
-        HTTP_CODE=${USER_RESPONSE: -3}
-        BODY=${USER_RESPONSE%???}
+        HTTP_CODE=$(echo "$USER_RESPONSE" | tail -n 1)
+        BODY=$(echo "$USER_RESPONSE" | sed '$d')
         if [ "${HTTP_CODE}" = "200" ] || [ "${HTTP_CODE}" = "201" ]; then
-          echo "✓ User created successfully"
+          echo "✓ User created successfully (HTTP: ${HTTP_CODE})"
         else
           echo "⚠ User creation failed (HTTP: ${HTTP_CODE})"
+          echo "Response: ${BODY}"
         fi
         
         # E2E Test 2: Product Catalog Flow
         echo "E2E Test 2: Product Catalog and Search Flow"
-        PRODUCT_RESPONSE=$(curl -s -w "%{http_code}" -X POST "http://${API_GATEWAY_URL}/product-service/api/products" \
+        PRODUCT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "http://${API_GATEWAY_URL}/product-service/api/products" \
             -H "Content-Type: application/json" \
             -d '{"productId": 4,"productTitle": "Test Product","imageUrl": "test.com","sku": "TEST001","priceUnit": 99.99,"quantity": 10,"category": {    "categoryId": 3,    "categoryTitle": "Game",    "imageUrl": null}}' || echo "")
         
-        PROD_HTTP_CODE=${PRODUCT_RESPONSE: -3}
+        PROD_HTTP_CODE=$(echo "$PRODUCT_RESPONSE" | tail -n 1)
+        PROD_BODY=$(echo "$PRODUCT_RESPONSE" | sed '$d')
         if [ "${PROD_HTTP_CODE}" = "200" ] || [ "${PROD_HTTP_CODE}" = "201" ]; then
-          echo "✓ Product created successfully"
+          echo "✓ Product created successfully (HTTP: ${PROD_HTTP_CODE})"
         else
           echo "⚠ Product creation failed (HTTP: ${PROD_HTTP_CODE})"
         fi
         
         # E2E Test 3: Order Flow
         echo "E2E Test 3: Shopping Cart and Order Flow"
-        ORDER_RESPONSE=$(curl -s -w "%{http_code}" -X POST "http://${API_GATEWAY_URL}/order-service/api/orders" \
+        ORDER_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "http://${API_GATEWAY_URL}/order-service/api/orders" \
             -H "Content-Type: application/json" \
             -d '{"orderId": 3,"orderDesc": "Complete shopping order","orderFee": 1029.98,"cart": {     "cartId":3 }}' || echo "")
         
-        ORDER_HTTP_CODE=${ORDER_RESPONSE: -3}
+        ORDER_HTTP_CODE=$(echo "$ORDER_RESPONSE" | tail -n 1)
+        ORDER_BODY=$(echo "$ORDER_RESPONSE" | sed '$d')
         if [ "${ORDER_HTTP_CODE}" = "200" ] || [ "${ORDER_HTTP_CODE}" = "201" ]; then
-          echo "✓ Order created successfully"
+          echo "✓ Order created successfully (HTTP: ${ORDER_HTTP_CODE})"
         else
           echo "⚠ Order creation failed (HTTP: ${ORDER_HTTP_CODE})"
         fi
@@ -223,6 +253,14 @@ jobs:
         fi
         
         echo "=== E2E Tests completed ==="
+    
+    - name: Stop port-forward
+      if: always()
+      run: |
+        if [ -f /tmp/kubectl-pf.pid ]; then
+          kill $(cat /tmp/kubectl-pf.pid) 2>/dev/null || true
+        fi
+        pkill -f "kubectl port-forward" || true
     
     - name: Cleanup
       if: always()
