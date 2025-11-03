@@ -11,6 +11,10 @@ def SERVICES = [
 pipeline {
     agent any
     
+    tools {
+        maven 'Maven-3.9'
+    }
+    
     environment {
         REGISTRY = 'docker.io/gersondj'
         DOCKERHUB = 'docker-hub-credentials'
@@ -179,7 +183,15 @@ pipeline {
                 withCredentials([usernamePassword(credentialsId: "${DOCKERHUB}", usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     script {
                         sh '''
-                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                            if [ -z "$DOCKER_USER" ] || [ -z "$DOCKER_PASS" ]; then
+                                echo "Error: Docker credentials are empty"
+                                exit 1
+                            fi
+                            echo "$DOCKER_PASS" | docker login docker.io -u "$DOCKER_USER" --password-stdin || {
+                                echo "Docker login failed"
+                                exit 1
+                            }
+                            echo "Docker login successful"
                         '''
                         
                         // Push changed services
@@ -331,7 +343,7 @@ pipeline {
                         
                         # Crear tag de release
                         git tag -a v${RELEASE_VERSION} -m "Release version ${RELEASE_VERSION}"
-                        git remote set-url origin https://${GITHUB_TOKEN}@github.com/gerson05/ecommerce-microservice-backend.git
+                        git remote set-url origin https://${GITHUB_TOKEN}@github.com/gerson05/ecommerce-microservice-backend-EntregaSoft.git
                         git push origin v${RELEASE_VERSION}
                     """
                 }
