@@ -276,12 +276,8 @@ pipeline {
         }
         
         stage('E2E Tests') {
-            when {
-                anyOf {
-                    equals expected: 'staging', actual: env.TARGET_ENVIRONMENT
-                    equals expected: 'production', actual: env.TARGET_ENVIRONMENT
-                }
-            }
+            // Always run E2E tests regardless of environment
+            // (Unit tests are already handled by GitHub Actions)
             steps {
                 withCredentials([file(credentialsId: "${KUBECONFIG_CREDENTIAL}", variable: 'KCFG')]) {
                     script {
@@ -292,12 +288,8 @@ pipeline {
         }
         
         stage('Performance Tests') {
-            when {
-                anyOf {
-                    equals expected: 'staging', actual: env.TARGET_ENVIRONMENT
-                    equals expected: 'production', actual: env.TARGET_ENVIRONMENT
-                }
-            }
+            // Always run performance tests regardless of environment
+            // (Unit tests are already handled by GitHub Actions)
             steps {
                 withCredentials([file(credentialsId: "${KUBECONFIG_CREDENTIAL}", variable: 'KCFG')]) {
                     script {
