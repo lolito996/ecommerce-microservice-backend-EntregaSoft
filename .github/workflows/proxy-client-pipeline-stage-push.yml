@@ -9,6 +9,9 @@ jobs:
   build_push:
     #needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
     steps:
     - uses: actions/checkout@v2
     - name: Set up JDK 11
