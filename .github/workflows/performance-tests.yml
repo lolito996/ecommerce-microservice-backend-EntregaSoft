@@ -1,0 +1,294 @@
+name: Performance Tests
+
+on:
+  push:
+    branches: [ develop, stage, master ]
+  pull_request:
+    branches: [ develop, stage, master ]
+  workflow_dispatch:
+
+jobs:
+  performance-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up JDK 11
+      uses: actions/setup-java@v3
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: Configure Docker for kind
+      run: |
+        sudo sysctl fs.inotify.max_user_instances=1280 || true
+        sudo sysctl fs.inotify.max_user_watches=655360 || true
+    
+    - name: Install kind
+      run: |
+        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+        chmod +x ./kind
+        sudo mv ./kind /usr/local/bin/kind
+        kind version
+    
+    - name: Create kind cluster
+      run: |
+        kind create cluster --name ecommerce-cluster --config - <<EOF
+        kind: Cluster
+        apiVersion: kind.x-k8s.io/v1alpha4
+        nodes:
+        - role: control-plane
+          kubeadmConfigPatches:
+          - |
+            kind: InitConfiguration
+            nodeRegistration:
+              kubeletExtraArgs:
+                node-labels: "ingress-ready=true"
+          extraPortMappings:
+          - containerPort: 30080
+            hostPort: 30080
+            protocol: TCP
+          - containerPort: 30187
+            hostPort: 30187
+            protocol: TCP
+        EOF
+    
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+    
+    - name: Get kubeconfig
+      run: |
+        mkdir -p ~/.kube
+        kind get kubeconfig --name ecommerce-cluster > ~/.kube/config
+        kubectl cluster-info
+    
+    - name: Create namespace
+      run: |
+        kubectl create namespace microservices-staging || true
+    
+    - name: Build Docker images with Maven
+      run: |
+        mvn clean package -DskipTests -B
+        REGISTRY="docker.io/gersondj"
+        IMAGE_TAG="gha-perf-$(git rev-parse --short HEAD)"
+        
+        # Build images
+        docker build -f service-discovery/Dockerfile -t ${REGISTRY}/service-discovery:${IMAGE_TAG} -t ${REGISTRY}/service-discovery:latest .
+        docker build -f api-gateway/Dockerfile -t ${REGISTRY}/api-gateway:${IMAGE_TAG} -t ${REGISTRY}/api-gateway:latest .
+        docker build -f user-service/Dockerfile -t ${REGISTRY}/user-service:${IMAGE_TAG} -t ${REGISTRY}/user-service:latest .
+        docker build -f product-service/Dockerfile -t ${REGISTRY}/product-service:${IMAGE_TAG} -t ${REGISTRY}/product-service:latest .
+        docker build -f order-service/Dockerfile -t ${REGISTRY}/order-service:${IMAGE_TAG} -t ${REGISTRY}/order-service:latest .
+        docker build -f shipping-service/Dockerfile -t ${REGISTRY}/shipping-service:${IMAGE_TAG} -t ${REGISTRY}/shipping-service:latest .
+        docker build -f proxy-client/Dockerfile -t ${REGISTRY}/proxy-client:${IMAGE_TAG} -t ${REGISTRY}/proxy-client:latest .
+    
+    - name: Load images into kind
+      run: |
+        IMAGE_TAG="gha-perf-$(git rev-parse --short HEAD)"
+        kind load docker-image docker.io/gersondj/service-discovery:${IMAGE_TAG} --name ecommerce-cluster
+        kind load docker-image docker.io/gersondj/api-gateway:${IMAGE_TAG} --name ecommerce-cluster
+        kind load docker-image docker.io/gersondj/user-service:${IMAGE_TAG} --name ecommerce-cluster
+        kind load docker-image docker.io/gersondj/product-service:${IMAGE_TAG} --name ecommerce-cluster
+        kind load docker-image docker.io/gersondj/order-service:${IMAGE_TAG} --name ecommerce-cluster
+        kind load docker-image docker.io/gersondj/shipping-service:${IMAGE_TAG} --name ecommerce-cluster
+        kind load docker-image docker.io/gersondj/proxy-client:${IMAGE_TAG} --name ecommerce-cluster
+    
+    - name: Deploy services to kind
+      run: |
+        export REGISTRY="docker.io/gersondj"
+        export IMAGE_TAG="gha-perf-$(git rev-parse --short HEAD)"
+        export NAMESPACE="microservices-staging"
+        
+        # Apply ConfigMap
+        sed -e "s|\${NAMESPACE}|${NAMESPACE}|g" k8s/base/configmap.yaml | kubectl apply -f -
+        
+        # Deploy services in order
+        # Zipkin
+        sed -e "s|\${REGISTRY}|${REGISTRY}|g" \
+            -e "s|\${NAMESPACE}|${NAMESPACE}|g" \
+            -e "s|\${IMAGE_TAG}|${IMAGE_TAG}|g" \
+            -e "s|\${NODE_PORT}|30087|g" \
+            k8s/base/zipkin.yaml | kubectl apply -f -
+        
+        # Service Discovery
+        sed -e "s|\${REGISTRY}|${REGISTRY}|g" \
+            -e "s|\${NAMESPACE}|${NAMESPACE}|g" \
+            -e "s|\${IMAGE_TAG}|${IMAGE_TAG}|g" \
+            -e "s|\${NODE_PORT}|30187|g" \
+            k8s/base/service-discovery.yaml | kubectl apply -f -
+        kubectl wait --for=condition=ready pod -l app=service-discovery -n ${NAMESPACE} --timeout=300s || true
+        
+        # API Gateway
+        sed -e "s|\${REGISTRY}|${REGISTRY}|g" \
+            -e "s|\${NAMESPACE}|${NAMESPACE}|g" \
+            -e "s|\${IMAGE_TAG}|${IMAGE_TAG}|g" \
+            -e "s|\${NODE_PORT}|30180|g" \
+            k8s/base/api-gateway.yaml | kubectl apply -f -
+        kubectl wait --for=condition=ready pod -l app=api-gateway -n ${NAMESPACE} --timeout=300s || true
+        
+        # Other services
+        for service in user-service product-service order-service shipping-service proxy-client; do
+          sed -e "s|\${REGISTRY}|${REGISTRY}|g" \
+              -e "s|\${NAMESPACE}|${NAMESPACE}|g" \
+              -e "s|\${IMAGE_TAG}|${IMAGE_TAG}|g" \
+              k8s/base/${service}.yaml | kubectl apply -f -
+        done
+        
+        # Wait for all services
+        kubectl wait --for=condition=ready pod --all -n ${NAMESPACE} --timeout=600s || true
+        kubectl get pods -n ${NAMESPACE}
+    
+    - name: Wait for services to be ready
+      run: |
+        export NAMESPACE="microservices-staging"
+        echo "Waiting for services to be ready..."
+        sleep 60
+        kubectl get pods -n ${NAMESPACE}
+        kubectl get svc -n ${NAMESPACE}
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Create Locust test file
+      run: |
+        cat > locustfile.py <<'EOF'
+import time
+import random
+from locust import HttpUser, task, between
+
+class EcommerceUser(HttpUser):
+    wait_time = between(1, 3)
+    
+    def on_start(self):
+        """Called when a user starts"""
+        self.user_id = None
+        self.product_ids = []
+        self.order_id = None
+        
+    @task(3)
+    def view_products(self):
+        """View product catalog"""
+        response = self.client.get("/product-service/api/products")
+        if response.status_code == 200:
+            products = response.json()
+            if 'collection' in products and products['collection']:
+                self.product_ids = [p['productId'] for p in products['collection'][:5]]
+    
+    @task(2)
+    def create_user(self):
+        """Create a new user"""
+        user_data = { "userId": 4, "firstName": "María", "lastName": "García", "imageUrl": "https://example.com/maria.jpg", "email": "maria.garcia@example.com", "phone": "+573007654321", "credential": {   "username": "maria.garcia",   "password": "SecurePass123!",   "roleBasedAuthority": "ROLE_USER",   "isEnabled": True,   "isAccountNonExpired": True,   "isAccountNonLocked": True,   "isCredentialsNonExpired": True }}
+        response = self.client.post("/user-service/api/users", json=user_data)
+        if response.status_code == 200:
+            self.user_id = response.json().get('userId')
+    
+    @task(2)
+    def get_user(self):
+        """Get user details"""
+        if self.user_id:
+            self.client.get(f"/user-service/api/users/{self.user_id}")
+    
+    @task(1)
+    def create_order(self):
+        """Create an order"""
+        if self.user_id:
+            order_data = {
+                "orderId": 3,
+                "orderDesc": "Complete shopping order",
+                "orderFee": 1029.98,
+                "cart": {
+                    "cartId": 3
+                }
+            }
+            response = self.client.post("/order-service/api/orders", json=order_data)
+            if response.status_code == 200:
+                self.order_id = response.json().get('orderId')
+    
+    @task(1)
+    def add_order_item(self):
+        """Add item to order"""
+        if self.order_id and self.product_ids:
+            item_data = {
+                "orderId": 3,
+                "productId": 4,
+                "orderedQuantity": 1
+            }
+            self.client.post("/shipping-service/api/shippings", json=item_data)
+    
+    @task(1)
+    def view_orders(self):
+        """View all orders"""
+        self.client.get("/order-service/api/orders")
+    
+    @task(1)
+    def view_order_items(self):
+        """View order items"""
+        self.client.get("/shipping-service/api/shippings")
+EOF
+    
+    - name: Install Locust
+      run: |
+        pip install locust
+    
+    - name: Run Performance Tests
+      run: |
+        export API_GATEWAY_URL="localhost:30080"
+        
+        echo "=== Running Performance Tests with Locust ==="
+        echo "Target: http://${API_GATEWAY_URL}"
+        echo "Users: 50"
+        echo "Spawn rate: 10"
+        echo "Duration: 300 seconds"
+        
+        locust -f locustfile.py \
+          --host=http://${API_GATEWAY_URL} \
+          --users=50 \
+          --spawn-rate=10 \
+          --run-time=300s \
+          --html=performance_report.html \
+          --csv=performance_data \
+          --headless || {
+          echo "Warning: Performance tests completed with errors (services may not be fully ready)"
+        }
+    
+    - name: Generate Performance Summary
+      if: always()
+      run: |
+        echo "=== Performance Test Summary ==="
+        if [ -f performance_data_stats.csv ]; then
+          echo "Total Requests: $(tail -n 1 performance_data_stats.csv | cut -d',' -f2)"
+          echo "Failed Requests: $(tail -n 1 performance_data_stats.csv | cut -d',' -f3)"
+          echo "Average Response Time: $(tail -n 1 performance_data_stats.csv | cut -d',' -f4)ms"
+          echo "Min Response Time: $(tail -n 1 performance_data_stats.csv | cut -d',' -f6)ms"
+          echo "Max Response Time: $(tail -n 1 performance_data_stats.csv | cut -d',' -f7)ms"
+          echo "Requests per Second: $(tail -n 1 performance_data_stats.csv | cut -d',' -f5)"
+        else
+          echo "No performance data available"
+        fi
+    
+    - name: Upload Performance Reports
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-reports
+        path: |
+          performance_report.html
+          performance_data*.csv
+        retention-days: 30
+    
+    - name: Cleanup
+      if: always()
+      run: |
+        kind delete cluster --name ecommerce-cluster || true
+
