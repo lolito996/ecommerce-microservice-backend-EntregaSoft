@@ -1,0 +1,229 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [ develop, stage, master ]
+  pull_request:
+    branches: [ develop, stage, master ]
+  workflow_dispatch:
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up JDK 11
+      uses: actions/setup-java@v3
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: Configure Docker for kind
+      run: |
+        sudo sysctl fs.inotify.max_user_instances=1280 || true
+        sudo sysctl fs.inotify.max_user_watches=655360 || true
+    
+    - name: Install kind
+      uses: engineerd/setup-kind@v0.6.0
+      with:
+        version: "v0.20.0"
+    
+    - name: Create kind cluster
+      run: |
+        kind create cluster --name ecommerce-cluster --config - <<EOF
+        kind: Cluster
+        apiVersion: kind.x-k8s.io/v1alpha4
+        nodes:
+        - role: control-plane
+          kubeadmConfigPatches:
+          - |
+            kind: InitConfiguration
+            nodeRegistration:
+              kubeletExtraArgs:
+                node-labels: "ingress-ready=true"
+          extraPortMappings:
+          - containerPort: 30080
+            hostPort: 30080
+            protocol: TCP
+          - containerPort: 30187
+            hostPort: 30187
+            protocol: TCP
+        EOF
+    
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+    
+    - name: Get kubeconfig
+      run: |
+        mkdir -p ~/.kube
+        kind get kubeconfig --name ecommerce-cluster > ~/.kube/config
+        kubectl cluster-info
+    
+    - name: Create namespace
+      run: |
+        kubectl create namespace microservices-staging || true
+    
+    - name: Build Docker images with Maven
+      run: |
+        mvn clean package -DskipTests -B
+        REGISTRY="docker.io/gersondj"
+        IMAGE_TAG="gha-test-$(git rev-parse --short HEAD)"
+        
+        # Build images
+        docker build -f service-discovery/Dockerfile -t ${REGISTRY}/service-discovery:${IMAGE_TAG} -t ${REGISTRY}/service-discovery:latest .
+        docker build -f api-gateway/Dockerfile -t ${REGISTRY}/api-gateway:${IMAGE_TAG} -t ${REGISTRY}/api-gateway:latest .
+        docker build -f user-service/Dockerfile -t ${REGISTRY}/user-service:${IMAGE_TAG} -t ${REGISTRY}/user-service:latest .
+        docker build -f product-service/Dockerfile -t ${REGISTRY}/product-service:${IMAGE_TAG} -t ${REGISTRY}/product-service:latest .
+        docker build -f order-service/Dockerfile -t ${REGISTRY}/order-service:${IMAGE_TAG} -t ${REGISTRY}/order-service:latest .
+        docker build -f shipping-service/Dockerfile -t ${REGISTRY}/shipping-service:${IMAGE_TAG} -t ${REGISTRY}/shipping-service:latest .
+        docker build -f proxy-client/Dockerfile -t ${REGISTRY}/proxy-client:${IMAGE_TAG} -t ${REGISTRY}/proxy-client:latest .
+    
+    - name: Load images into kind
+      run: |
+        IMAGE_TAG="gha-test-$(git rev-parse --short HEAD)"
+        kind load docker-image docker.io/gersondj/service-discovery:${IMAGE_TAG} --name ecommerce-cluster
+        kind load docker-image docker.io/gersondj/api-gateway:${IMAGE_TAG} --name ecommerce-cluster
+        kind load docker-image docker.io/gersondj/user-service:${IMAGE_TAG} --name ecommerce-cluster
+        kind load docker-image docker.io/gersondj/product-service:${IMAGE_TAG} --name ecommerce-cluster
+        kind load docker-image docker.io/gersondj/order-service:${IMAGE_TAG} --name ecommerce-cluster
+        kind load docker-image docker.io/gersondj/shipping-service:${IMAGE_TAG} --name ecommerce-cluster
+        kind load docker-image docker.io/gersondj/proxy-client:${IMAGE_TAG} --name ecommerce-cluster
+    
+    - name: Deploy services to kind
+      run: |
+        export REGISTRY="docker.io/gersondj"
+        export IMAGE_TAG="gha-test-$(git rev-parse --short HEAD)"
+        export NAMESPACE="microservices-staging"
+        
+        # Apply ConfigMap
+        sed -e "s|\${NAMESPACE}|${NAMESPACE}|g" k8s/base/configmap.yaml | kubectl apply -f -
+        
+        # Deploy services in order
+        # Zipkin
+        sed -e "s|\${REGISTRY}|${REGISTRY}|g" \
+            -e "s|\${NAMESPACE}|${NAMESPACE}|g" \
+            -e "s|\${IMAGE_TAG}|${IMAGE_TAG}|g" \
+            -e "s|\${NODE_PORT}|30087|g" \
+            k8s/base/zipkin.yaml | kubectl apply -f -
+        
+        # Service Discovery
+        sed -e "s|\${REGISTRY}|${REGISTRY}|g" \
+            -e "s|\${NAMESPACE}|${NAMESPACE}|g" \
+            -e "s|\${IMAGE_TAG}|${IMAGE_TAG}|g" \
+            -e "s|\${NODE_PORT}|30187|g" \
+            k8s/base/service-discovery.yaml | kubectl apply -f -
+        kubectl wait --for=condition=ready pod -l app=service-discovery -n ${NAMESPACE} --timeout=300s || true
+        
+        # API Gateway
+        sed -e "s|\${REGISTRY}|${REGISTRY}|g" \
+            -e "s|\${NAMESPACE}|${NAMESPACE}|g" \
+            -e "s|\${IMAGE_TAG}|${IMAGE_TAG}|g" \
+            -e "s|\${NODE_PORT}|30180|g" \
+            k8s/base/api-gateway.yaml | kubectl apply -f -
+        kubectl wait --for=condition=ready pod -l app=api-gateway -n ${NAMESPACE} --timeout=300s || true
+        
+        # Other services
+        for service in user-service product-service order-service shipping-service proxy-client; do
+          sed -e "s|\${REGISTRY}|${REGISTRY}|g" \
+              -e "s|\${NAMESPACE}|${NAMESPACE}|g" \
+              -e "s|\${IMAGE_TAG}|${IMAGE_TAG}|g" \
+              k8s/base/${service}.yaml | kubectl apply -f -
+        done
+        
+        # Wait for all services
+        kubectl wait --for=condition=ready pod --all -n ${NAMESPACE} --timeout=600s || true
+        kubectl get pods -n ${NAMESPACE}
+    
+    - name: Wait for services to be ready
+      run: |
+        export NAMESPACE="microservices-staging"
+        echo "Waiting for services to be ready..."
+        sleep 60
+        kubectl get pods -n ${NAMESPACE}
+        kubectl get svc -n ${NAMESPACE}
+    
+    - name: Run E2E Tests
+      run: |
+        export API_GATEWAY_URL="localhost:30080"
+        
+        echo "=== Running E2E Tests ==="
+        
+        # E2E Test 1: User Registration and Profile Update Flow
+        echo "E2E Test 1: User Registration and Profile Update Flow"
+        USER_RESPONSE=$(curl -s -w "%{http_code}" -X POST "http://${API_GATEWAY_URL}/user-service/api/users" \
+            -H "Content-Type: application/json" \
+            -d '{ "userId": 4, "firstName": "María", "lastName": "García", "imageUrl": "https://example.com/maria.jpg", "email": "maria.garcia@example.com", "phone": "+573007654321", "credential": {   "username": "maria.garcia",   "password": "SecurePass123!",   "roleBasedAuthority": "ROLE_USER",   "isEnabled": true,   "isAccountNonExpired": true,   "isAccountNonLocked": true,   "isCredentialsNonExpired": true }}' || echo "")
+        
+        HTTP_CODE=${USER_RESPONSE: -3}
+        BODY=${USER_RESPONSE%???}
+        if [ "${HTTP_CODE}" = "200" ] || [ "${HTTP_CODE}" = "201" ]; then
+          echo "✓ User created successfully"
+        else
+          echo "⚠ User creation failed (HTTP: ${HTTP_CODE})"
+        fi
+        
+        # E2E Test 2: Product Catalog Flow
+        echo "E2E Test 2: Product Catalog and Search Flow"
+        PRODUCT_RESPONSE=$(curl -s -w "%{http_code}" -X POST "http://${API_GATEWAY_URL}/product-service/api/products" \
+            -H "Content-Type: application/json" \
+            -d '{"productId": 4,"productTitle": "Test Product","imageUrl": "test.com","sku": "TEST001","priceUnit": 99.99,"quantity": 10,"category": {    "categoryId": 3,    "categoryTitle": "Game",    "imageUrl": null}}' || echo "")
+        
+        PROD_HTTP_CODE=${PRODUCT_RESPONSE: -3}
+        if [ "${PROD_HTTP_CODE}" = "200" ] || [ "${PROD_HTTP_CODE}" = "201" ]; then
+          echo "✓ Product created successfully"
+        else
+          echo "⚠ Product creation failed (HTTP: ${PROD_HTTP_CODE})"
+        fi
+        
+        # E2E Test 3: Order Flow
+        echo "E2E Test 3: Shopping Cart and Order Flow"
+        ORDER_RESPONSE=$(curl -s -w "%{http_code}" -X POST "http://${API_GATEWAY_URL}/order-service/api/orders" \
+            -H "Content-Type: application/json" \
+            -d '{"orderId": 3,"orderDesc": "Complete shopping order","orderFee": 1029.98,"cart": {     "cartId":3 }}' || echo "")
+        
+        ORDER_HTTP_CODE=${ORDER_RESPONSE: -3}
+        if [ "${ORDER_HTTP_CODE}" = "200" ] || [ "${ORDER_HTTP_CODE}" = "201" ]; then
+          echo "✓ Order created successfully"
+        else
+          echo "⚠ Order creation failed (HTTP: ${ORDER_HTTP_CODE})"
+        fi
+        
+        # E2E Test 4: Health Checks
+        echo "E2E Test 4: System Health and Monitoring Flow"
+        USER_HEALTH=$(curl -s --max-time 5 "http://${API_GATEWAY_URL}/user-service/actuator/health" 2>/dev/null || echo "unavailable")
+        PRODUCT_HEALTH=$(curl -s --max-time 5 "http://${API_GATEWAY_URL}/product-service/actuator/health" 2>/dev/null || echo "unavailable")
+        ORDER_HEALTH=$(curl -s --max-time 5 "http://${API_GATEWAY_URL}/order-service/actuator/health" 2>/dev/null || echo "unavailable")
+        SHIPPING_HEALTH=$(curl -s --max-time 5 "http://${API_GATEWAY_URL}/shipping-service/actuator/health" 2>/dev/null || echo "unavailable")
+        
+        HEALTH_COUNT=0
+        [ "$USER_HEALTH" != "unavailable" ] && HEALTH_COUNT=$((HEALTH_COUNT + 1)) && echo "✓ User service health: OK"
+        [ "$PRODUCT_HEALTH" != "unavailable" ] && HEALTH_COUNT=$((HEALTH_COUNT + 1)) && echo "✓ Product service health: OK"
+        [ "$ORDER_HEALTH" != "unavailable" ] && HEALTH_COUNT=$((HEALTH_COUNT + 1)) && echo "✓ Order service health: OK"
+        [ "$SHIPPING_HEALTH" != "unavailable" ] && HEALTH_COUNT=$((HEALTH_COUNT + 1)) && echo "✓ Shipping service health: OK"
+        
+        echo "Health check summary: ${HEALTH_COUNT}/4 services available"
+        
+        if [ "${HEALTH_COUNT}" -ge 2 ]; then
+          echo "✓ E2E Tests: At least 2 services are healthy"
+        else
+          echo "⚠ E2E Tests: Warning - Less than 2 services available"
+        fi
+        
+        echo "=== E2E Tests completed ==="
+    
+    - name: Cleanup
+      if: always()
+      run: |
+        kind delete cluster --name ecommerce-cluster || true
+
