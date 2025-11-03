@@ -183,6 +183,7 @@ pipeline {
                 withCredentials([usernamePassword(credentialsId: "${DOCKERHUB}", usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     script {
                         sh '''
+                            export PATH=/usr/local/bin:$PATH
                             if [ -z "$DOCKER_USER" ] || [ -z "$DOCKER_PASS" ]; then
                                 echo "Error: Docker credentials are empty"
                                 exit 1
@@ -198,6 +199,7 @@ pipeline {
                         def changedServices = env.CHANGED_SERVICES.split(',')
                         for (serviceName in changedServices) {
                             sh """
+                                export PATH=/usr/local/bin:\$PATH
                                 docker push ${REGISTRY}/${serviceName}:${IMAGE_TAG}
                                 docker push ${REGISTRY}/${serviceName}:${LATEST_TAG}
                             """
@@ -406,8 +408,8 @@ def buildService(serviceName, servicePort) {
         }
     }
     
-    // Build Docker image with proper tags
-    sh "docker build -f ${serviceName}/Dockerfile -t ${REGISTRY}/${serviceName}:${IMAGE_TAG} -t ${REGISTRY}/${serviceName}:${LATEST_TAG} ."
+    // Build Docker image with proper tags (using full path to docker)
+    sh "export PATH=/usr/local/bin:\$PATH && docker build -f ${serviceName}/Dockerfile -t ${REGISTRY}/${serviceName}:${IMAGE_TAG} -t ${REGISTRY}/${serviceName}:${LATEST_TAG} ."
     
     echo "Successfully built ${serviceName}:${IMAGE_TAG}"
 }
