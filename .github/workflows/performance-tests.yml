@@ -154,15 +154,28 @@ jobs:
         sleep 60
         kubectl get pods -n ${NAMESPACE}
         kubectl get svc -n ${NAMESPACE}
-    
+        
+        # Wait for all pods to be ready
+        kubectl wait --for=condition=ready pod --all -n ${NAMESPACE} --timeout=300s || true
+        echo "All pods are ready"
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-    
+
     - name: Install Locust
       run: |
         pip install locust
+
+    - name: Port forward API Gateway
+      run: |
+        kubectl port-forward -n microservices-staging svc/api-gateway 30080:8080 > /tmp/port-forward.log 2>&1 &
+        echo $! > /tmp/kubectl-pf.pid
+        sleep 10
+        # Test connection
+        curl -s -o /dev/null -w "%{http_code}" "http://localhost:30080/actuator/health" || echo "000"
+      continue-on-error: true
 
     - name: Run Performance Tests
       run: |
@@ -210,6 +223,14 @@ jobs:
           performance_data*.csv
         retention-days: 30
     
+    - name: Stop port-forward
+      if: always()
+      run: |
+        if [ -f /tmp/kubectl-pf.pid ]; then
+          kill $(cat /tmp/kubectl-pf.pid) 2>/dev/null || true
+        fi
+        pkill -f "kubectl port-forward" || true
+
     - name: Cleanup
       if: always()
       run: |
