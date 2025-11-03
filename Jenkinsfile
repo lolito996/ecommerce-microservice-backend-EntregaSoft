@@ -39,10 +39,20 @@ pipeline {
                     
                     // Get branch name and clean it (remove origin/, remotes/origin/, etc.)
                     def gitBranchRaw = sh(script: "git rev-parse --abbrev-ref HEAD", returnStdout: true).trim()
-                    env.GIT_BRANCH = gitBranchRaw.replaceAll('^origin/', '').replaceAll('^remotes/origin/', '').replaceAll('/', '-')
+                    echo "Raw branch name: ${gitBranchRaw}"
+                    
+                    // Clean branch name: remove origin/, remotes/origin/, and replace all slashes with dashes
+                    def cleanBranch = gitBranchRaw
+                    if (cleanBranch.startsWith('origin/')) {
+                        cleanBranch = cleanBranch.substring(7) // Remove "origin/"
+                    }
+                    if (cleanBranch.startsWith('remotes/origin/')) {
+                        cleanBranch = cleanBranch.substring(15) // Remove "remotes/origin/"
+                    }
+                    cleanBranch = cleanBranch.replaceAll('/', '-') // Replace any remaining slashes
+                    env.GIT_BRANCH = cleanBranch
                     
                     // Determine environment based on branch
-                    def cleanBranch = env.GIT_BRANCH
                     if (cleanBranch == 'main' || cleanBranch == 'master') {
                         env.TARGET_ENVIRONMENT = 'production'
                     } else if (cleanBranch == 'develop' || cleanBranch == 'staging') {
@@ -51,7 +61,7 @@ pipeline {
                         env.TARGET_ENVIRONMENT = 'dev'
                     }
                     
-                    // Create image tags (replace any remaining / with - to avoid Docker tag errors)
+                    // Create image tags (ensure no slashes for Docker compatibility)
                     env.IMAGE_TAG = "${env.GIT_BRANCH}-${env.GIT_COMMIT_SHORT}".replaceAll('/', '-')
                     env.LATEST_TAG = "latest"
                     
