@@ -17,7 +17,18 @@ jobs:
         java-version: '11'
         distribution: 'adopt'
     - name: Build with Maven
-      run: mvn -B package --file pom.xml
+      run: mvn clean compile --file pom.xml
+    - name: Run tests
+      run: mvn test --file pom.xml
+      continue-on-error: true
+    - name: Package application
+      run: mvn package --file pom.xml -DskipTests
+    - name: Publish test results
+      uses: EnricoMi/publish-unit-test-result-action@v2
+      if: always()
+      with:
+        files: '**/target/surefire-reports/*.xml'
+        check_name: 'Unit Test Results'
     - name: Setup env variables for Docker
       run: echo Setup env variables for Docker
       env:
