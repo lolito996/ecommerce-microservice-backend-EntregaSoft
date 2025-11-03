@@ -36,19 +36,23 @@ pipeline {
                 script {
                     env.DEPLOY_TIMESTAMP = sh(script: 'date +%Y%m%d-%H%M%S', returnStdout: true).trim()
                     env.GIT_COMMIT_SHORT = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
-                    env.GIT_BRANCH = sh(script: "git rev-parse --abbrev-ref HEAD", returnStdout: true).trim()
+                    
+                    // Get branch name and clean it (remove origin/, remotes/origin/, etc.)
+                    def gitBranchRaw = sh(script: "git rev-parse --abbrev-ref HEAD", returnStdout: true).trim()
+                    env.GIT_BRANCH = gitBranchRaw.replaceAll('^origin/', '').replaceAll('^remotes/origin/', '').replaceAll('/', '-')
                     
                     // Determine environment based on branch
-                    if (env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'master') {
+                    def cleanBranch = env.GIT_BRANCH
+                    if (cleanBranch == 'main' || cleanBranch == 'master') {
                         env.TARGET_ENVIRONMENT = 'production'
-                    } else if (env.GIT_BRANCH == 'develop' || env.GIT_BRANCH == 'staging') {
+                    } else if (cleanBranch == 'develop' || cleanBranch == 'staging') {
                         env.TARGET_ENVIRONMENT = 'staging'
                     } else {
                         env.TARGET_ENVIRONMENT = 'dev'
                     }
                     
-                    // Create image tags
-                    env.IMAGE_TAG = "${env.GIT_BRANCH}-${env.GIT_COMMIT_SHORT}"
+                    // Create image tags (replace any remaining / with - to avoid Docker tag errors)
+                    env.IMAGE_TAG = "${env.GIT_BRANCH}-${env.GIT_COMMIT_SHORT}".replaceAll('/', '-')
                     env.LATEST_TAG = "latest"
                     
                     echo "Branch: ${env.GIT_BRANCH}"
