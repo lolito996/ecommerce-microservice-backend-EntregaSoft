@@ -438,6 +438,24 @@ def deployAllServicesToStaging() {
     def namespace = K8S_NAMESPACE_STAGING
     echo "Deploying all services to staging for testing (namespace: ${namespace})..."
 
+    // Fix kubeconfig server address for container access
+    // Replace 0.0.0.0 with host.docker.internal (Docker Desktop) or host IP
+    sh """
+        # Backup original kubeconfig
+        cp "\$KCFG" "\$KCFG.bak"
+        
+        # Try to get host IP - on Windows Docker Desktop, use host.docker.internal
+        # On Linux, get the gateway IP of docker0 network
+        HOST_IP=\$(getent hosts host.docker.internal 2>/dev/null | awk '{print \$1}' || \\
+                   ip route | grep default | awk '{print \$3}' | head -1 || \\
+                   echo "host.docker.internal")
+        
+        # Update kubeconfig to use accessible server address
+        sed -i "s|server: https://0.0.0.0:6443|server: https://\${HOST_IP}:6443|g" "\$KCFG" || \\
+        sed -i "s|server: https://0.0.0.0:6443|server: https://host.docker.internal:6443|g" "\$KCFG" || \\
+        echo "Warning: Could not update kubeconfig server address"
+    """
+
     // Apply the ConfigMap
     sh """
         sed -e "s|\\\${NAMESPACE}|${namespace}|g" \
