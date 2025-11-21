@@ -62,8 +62,8 @@ class FavouriteServiceTest {
                 .productId(1)
                 .build();
 
-        when(userServiceClient.fetchUser(anyInt())).thenReturn(UserDto.builder().userId(1).build());
-        when(productServiceClient.fetchProduct(anyInt())).thenReturn(ProductDto.builder().productId(1).build());
+        lenient().when(userServiceClient.fetchUser(anyInt())).thenReturn(UserDto.builder().userId(1).build());
+        lenient().when(productServiceClient.fetchProduct(anyInt())).thenReturn(ProductDto.builder().productId(1).build());
     }
 
     @Test
