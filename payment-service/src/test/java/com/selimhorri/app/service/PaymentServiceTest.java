@@ -16,8 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.web.client.RestTemplate;
-
+import com.selimhorri.app.client.OrderServiceClient;
 import com.selimhorri.app.domain.Payment;
 import com.selimhorri.app.domain.PaymentStatus;
 import com.selimhorri.app.dto.OrderDto;
@@ -33,7 +32,7 @@ class PaymentServiceTest {
     private PaymentRepository paymentRepository;
 
     @Mock
-    private RestTemplate restTemplate;
+    private OrderServiceClient orderServiceClient;
 
     @InjectMocks
     private PaymentServiceImpl paymentService;
@@ -60,6 +59,8 @@ class PaymentServiceTest {
                         .build())
                         .isPayed(false)
                 .build();
+
+        when(orderServiceClient.fetchOrder(anyInt())).thenReturn(testPaymentDto.getOrderDto());
     }
 
     @Test

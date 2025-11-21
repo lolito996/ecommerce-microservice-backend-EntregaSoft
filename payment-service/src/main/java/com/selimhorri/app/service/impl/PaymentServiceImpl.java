@@ -6,9 +6,7 @@ import java.util.stream.Collectors;
 import javax.transaction.Transactional;
 
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-
-import com.selimhorri.app.constant.AppConstant;
+import com.selimhorri.app.client.OrderServiceClient;
 import com.selimhorri.app.dto.OrderDto;
 import com.selimhorri.app.dto.PaymentDto;
 import com.selimhorri.app.exception.wrapper.PaymentNotFoundException;
@@ -26,7 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 public class PaymentServiceImpl implements PaymentService {
 	
 	private final PaymentRepository paymentRepository;
-	private final RestTemplate restTemplate;
+	private final OrderServiceClient orderServiceClient;
 	
 	@Override
 	public List<PaymentDto> findAll() {
@@ -34,11 +32,7 @@ public class PaymentServiceImpl implements PaymentService {
 		return this.paymentRepository.findAll()
 				.stream()
 					.map(PaymentMappingHelper::map)
-					.map(p -> {
-						p.setOrderDto(this.restTemplate.getForObject(AppConstant.DiscoveredDomainsApi
-								.ORDER_SERVICE_API_URL + "/" + p.getOrderDto().getOrderId(), OrderDto.class));
-						return p;
-					})
+					.map(this::enrichOrder)
 					.distinct()
 					.collect(Collectors.toUnmodifiableList());
 	}
@@ -48,11 +42,7 @@ public class PaymentServiceImpl implements PaymentService {
 		log.info("*** PaymentDto, service; fetch payment by id *");
 		return this.paymentRepository.findById(paymentId)
 				.map(PaymentMappingHelper::map)
-				.map(p -> {
-					p.setOrderDto(this.restTemplate.getForObject(AppConstant.DiscoveredDomainsApi
-							.ORDER_SERVICE_API_URL + "/" + p.getOrderDto().getOrderId(), OrderDto.class));
-					return p;
-				})
+				.map(this::enrichOrder)
 				.orElseThrow(() -> new PaymentNotFoundException(String.format("Payment with id: %d not found", paymentId)));
 	}
 	
@@ -74,6 +64,15 @@ public class PaymentServiceImpl implements PaymentService {
 	public void deleteById(final Integer paymentId) {
 		log.info("*** Void, service; delete payment by id *");
 		this.paymentRepository.deleteById(paymentId);
+	}
+
+	private PaymentDto enrichOrder(final PaymentDto paymentDto) {
+		final OrderDto orderDto = paymentDto.getOrderDto();
+		if (orderDto == null) {
+			return paymentDto;
+		}
+		paymentDto.setOrderDto(this.orderServiceClient.fetchOrder(orderDto.getOrderId()));
+		return paymentDto;
 	}
 	
 	

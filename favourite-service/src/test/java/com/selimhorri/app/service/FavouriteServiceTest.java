@@ -15,11 +15,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.web.client.RestTemplate;
-
+import com.selimhorri.app.client.ProductServiceClient;
+import com.selimhorri.app.client.UserServiceClient;
 import com.selimhorri.app.domain.Favourite;
 import com.selimhorri.app.domain.id.FavouriteId;
 import com.selimhorri.app.dto.FavouriteDto;
+import com.selimhorri.app.dto.ProductDto;
+import com.selimhorri.app.dto.UserDto;
 import com.selimhorri.app.exception.wrapper.FavouriteNotFoundException;
 import com.selimhorri.app.repository.FavouriteRepository;
 import com.selimhorri.app.service.impl.FavouriteServiceImpl;
@@ -31,7 +33,10 @@ class FavouriteServiceTest {
     private FavouriteRepository favouriteRepository;
 
     @Mock
-    private RestTemplate restTemplate;
+    private UserServiceClient userServiceClient;
+
+    @Mock
+    private ProductServiceClient productServiceClient;
 
     @InjectMocks
     private FavouriteServiceImpl favouriteService;
@@ -56,6 +61,9 @@ class FavouriteServiceTest {
                 .userId(1)
                 .productId(1)
                 .build();
+
+        when(userServiceClient.fetchUser(anyInt())).thenReturn(UserDto.builder().userId(1).build());
+        when(productServiceClient.fetchProduct(anyInt())).thenReturn(ProductDto.builder().productId(1).build());
     }
 
     @Test

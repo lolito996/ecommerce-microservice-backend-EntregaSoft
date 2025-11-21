@@ -6,9 +6,7 @@ import java.util.stream.Collectors;
 import javax.transaction.Transactional;
 
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-
-import com.selimhorri.app.constant.AppConstant;
+import com.selimhorri.app.client.UserServiceClient;
 import com.selimhorri.app.dto.CartDto;
 import com.selimhorri.app.dto.UserDto;
 import com.selimhorri.app.exception.wrapper.CartNotFoundException;
@@ -26,7 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 public class CartServiceImpl implements CartService {
 	
 	private final CartRepository cartRepository;
-	private final RestTemplate restTemplate;
+	private final UserServiceClient userServiceClient;
 	
 	@Override
 	public List<CartDto> findAll() {
@@ -34,11 +32,7 @@ public class CartServiceImpl implements CartService {
 		return this.cartRepository.findAll()
 				.stream()
 					.map(CartMappingHelper::map)
-					.map(c -> {
-						c.setUserDto(this.restTemplate.getForObject(AppConstant.DiscoveredDomainsApi
-								.USER_SERVICE_API_URL + "/" + c.getUserDto().getUserId(), UserDto.class));
-						return c;
-					})
+					.map(this::enrichUser)
 					.distinct()
 					.collect(Collectors.toUnmodifiableList());
 	}
@@ -48,11 +42,7 @@ public class CartServiceImpl implements CartService {
 		log.info("*** CartDto, service; fetch cart by id *");
 		return this.cartRepository.findById(cartId)
 				.map(CartMappingHelper::map)
-				.map(c -> {
-					c.setUserDto(this.restTemplate.getForObject(AppConstant.DiscoveredDomainsApi
-							.USER_SERVICE_API_URL + "/" + c.getUserDto().getUserId(), UserDto.class));
-					return c;
-				})
+				.map(this::enrichUser)
 				.orElseThrow(() -> new CartNotFoundException(String
 						.format("Cart with id: %d not found", cartId)));
 	}
@@ -82,6 +72,15 @@ public class CartServiceImpl implements CartService {
 	public void deleteById(final Integer cartId) {
 		log.info("*** Void, service; delete cart by id *");
 		this.cartRepository.deleteById(cartId);
+	}
+
+	private CartDto enrichUser(final CartDto cartDto) {
+		final UserDto userDto = cartDto.getUserDto();
+		if (userDto == null) {
+			return cartDto;
+		}
+		cartDto.setUserDto(this.userServiceClient.fetchUser(userDto.getUserId()));
+		return cartDto;
 	}
 	
 	

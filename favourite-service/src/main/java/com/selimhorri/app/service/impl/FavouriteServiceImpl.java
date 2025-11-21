@@ -6,9 +6,8 @@ import java.util.stream.Collectors;
 import javax.transaction.Transactional;
 
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-
-import com.selimhorri.app.constant.AppConstant;
+import com.selimhorri.app.client.ProductServiceClient;
+import com.selimhorri.app.client.UserServiceClient;
 import com.selimhorri.app.domain.id.FavouriteId;
 import com.selimhorri.app.dto.FavouriteDto;
 import com.selimhorri.app.dto.ProductDto;
@@ -28,7 +27,8 @@ import lombok.extern.slf4j.Slf4j;
 public class FavouriteServiceImpl implements FavouriteService {
 	
 	private final FavouriteRepository favouriteRepository;
-	private final RestTemplate restTemplate;
+	private final UserServiceClient userServiceClient;
+	private final ProductServiceClient productServiceClient;
 	
 	@Override
 	public List<FavouriteDto> findAll() {
@@ -36,15 +36,7 @@ public class FavouriteServiceImpl implements FavouriteService {
 		return this.favouriteRepository.findAll()
 				.stream()
 					.map(FavouriteMappingHelper::map)
-					.map(f -> {
-						f.setUserDto(this.restTemplate
-								.getForObject(AppConstant.DiscoveredDomainsApi
-										.USER_SERVICE_API_URL + "/" + f.getUserId(), UserDto.class));
-						f.setProductDto(this.restTemplate
-								.getForObject(AppConstant.DiscoveredDomainsApi
-										.PRODUCT_SERVICE_API_URL + "/" + f.getProductId(), ProductDto.class));
-						return f;
-					})
+					.map(this::enrichRemoteData)
 					.distinct()
 					.collect(Collectors.toUnmodifiableList());
 	}
@@ -54,15 +46,7 @@ public class FavouriteServiceImpl implements FavouriteService {
 		log.info("*** FavouriteDto, service; fetch favourite by id *");
 		return this.favouriteRepository.findById(favouriteId)
 				.map(FavouriteMappingHelper::map)
-				.map(f -> {
-					f.setUserDto(this.restTemplate
-							.getForObject(AppConstant.DiscoveredDomainsApi
-									.USER_SERVICE_API_URL + "/" + f.getUserId(), UserDto.class));
-					f.setProductDto(this.restTemplate
-							.getForObject(AppConstant.DiscoveredDomainsApi
-									.PRODUCT_SERVICE_API_URL + "/" + f.getProductId(), ProductDto.class));
-					return f;
-				})
+				.map(this::enrichRemoteData)
 				.orElseThrow(() -> new FavouriteNotFoundException(
 						String.format("Favourite with id: [%s] not found!", favouriteId)));
 	}
@@ -82,6 +66,12 @@ public class FavouriteServiceImpl implements FavouriteService {
 	@Override
 	public void deleteById(final FavouriteId favouriteId) {
 		this.favouriteRepository.deleteById(favouriteId);
+	}
+
+	private FavouriteDto enrichRemoteData(final FavouriteDto favouriteDto) {
+		favouriteDto.setUserDto(this.userServiceClient.fetchUser(favouriteDto.getUserId()));
+		favouriteDto.setProductDto(this.productServiceClient.fetchProduct(favouriteDto.getProductId()));
+		return favouriteDto;
 	}
 	
 	

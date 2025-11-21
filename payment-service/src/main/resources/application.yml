@@ -14,6 +14,11 @@ spring:
     active:
     - dev
 
+app:
+  features:
+    enrich-remote-data: true
+    enable-resilience-logs: true
+
 resilience4j:
   circuitbreaker:
     instances:
@@ -27,6 +32,26 @@ resilience4j:
         sliding-window-size: 10
         wait-duration-in-open-state: 5s
         sliding-window-type: COUNT_BASED
+      orderServiceClient:
+        register-health-indicator: true
+        event-consumer-buffer-size: 10
+        automatic-transition-from-open-to-half-open-enabled: true
+        failure-rate-threshold: 50
+        minimum-number-of-calls: 5
+        permitted-number-of-calls-in-half-open-state: 3
+        sliding-window-size: 10
+        wait-duration-in-open-state: 5s
+        sliding-window-type: COUNT_BASED
+  retry:
+    instances:
+      orderServiceClient:
+        max-attempts: 3
+        wait-duration: 500ms
+  bulkhead:
+    instances:
+      orderServiceClient:
+        max-concurrent-calls: 10
+        max-wait-duration: 1s
 
 management:
   health:

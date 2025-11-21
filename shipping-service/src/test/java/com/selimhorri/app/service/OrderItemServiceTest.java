@@ -15,8 +15,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.web.client.RestTemplate;
-
+import com.selimhorri.app.client.OrderServiceClient;
+import com.selimhorri.app.client.ProductServiceClient;
 import com.selimhorri.app.domain.OrderItem;
 import com.selimhorri.app.domain.id.OrderItemId;
 import com.selimhorri.app.dto.OrderDto;
@@ -33,7 +33,10 @@ class OrderItemServiceTest {
     private OrderItemRepository orderItemRepository;
 
     @Mock
-    private RestTemplate restTemplate;
+    private ProductServiceClient productServiceClient;
+
+    @Mock
+    private OrderServiceClient orderServiceClient;
 
     @InjectMocks
     private OrderItemServiceImpl orderItemService;
@@ -74,6 +77,9 @@ class OrderItemServiceTest {
                 .productDto(testProductDto)
                 .orderDto(testOrderDto)
                 .build();
+
+        when(productServiceClient.fetchProduct(anyInt())).thenReturn(testProductDto);
+        when(orderServiceClient.fetchOrder(anyInt())).thenReturn(testOrderDto);
     }
 
     @Test
@@ -81,8 +87,6 @@ class OrderItemServiceTest {
         // Given
         List<OrderItem> orderItems = Arrays.asList(testOrderItem);
         when(orderItemRepository.findAll()).thenReturn(orderItems);
-        when(restTemplate.getForObject(anyString(), eq(ProductDto.class))).thenReturn(testProductDto);
-        when(restTemplate.getForObject(anyString(), eq(OrderDto.class))).thenReturn(testOrderDto);
 
         // When
         List<OrderItemDto> result = orderItemService.findAll();
@@ -192,12 +196,10 @@ class OrderItemServiceTest {
     }
 
     @Test
-    void testFindAll_WithRestTemplateCalls_ShouldSucceed() {
+    void testFindAll_WithRemoteClientCalls_ShouldSucceed() {
         // Given
         List<OrderItem> orderItems = Arrays.asList(testOrderItem);
         when(orderItemRepository.findAll()).thenReturn(orderItems);
-        when(restTemplate.getForObject(contains("PRODUCT-SERVICE"), eq(ProductDto.class))).thenReturn(testProductDto);
-        when(restTemplate.getForObject(contains("ORDER-SERVICE"), eq(OrderDto.class))).thenReturn(testOrderDto);
 
         // When
         List<OrderItemDto> result = orderItemService.findAll();
@@ -207,7 +209,7 @@ class OrderItemServiceTest {
         assertEquals(1, result.size());
         assertNotNull(result.get(0).getProductDto());
         assertNotNull(result.get(0).getOrderDto());
-        verify(restTemplate, times(1)).getForObject(contains("PRODUCT-SERVICE"), eq(ProductDto.class));
-        verify(restTemplate, times(1)).getForObject(contains("ORDER-SERVICE"), eq(OrderDto.class));
+        verify(productServiceClient, times(1)).fetchProduct(anyInt());
+        verify(orderServiceClient, times(1)).fetchOrder(anyInt());
     }
 }
