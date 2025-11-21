@@ -60,7 +60,7 @@ class PaymentServiceTest {
                         .isPayed(false)
                 .build();
 
-        when(orderServiceClient.fetchOrder(anyInt())).thenReturn(testPaymentDto.getOrderDto());
+        lenient().when(orderServiceClient.fetchOrder(anyInt())).thenReturn(testPaymentDto.getOrderDto());
     }
 
     @Test
