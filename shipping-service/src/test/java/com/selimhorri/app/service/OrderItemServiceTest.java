@@ -78,8 +78,8 @@ class OrderItemServiceTest {
                 .orderDto(testOrderDto)
                 .build();
 
-        when(productServiceClient.fetchProduct(anyInt())).thenReturn(testProductDto);
-        when(orderServiceClient.fetchOrder(anyInt())).thenReturn(testOrderDto);
+        lenient().when(productServiceClient.fetchProduct(anyInt())).thenReturn(testProductDto);
+        lenient().when(orderServiceClient.fetchOrder(anyInt())).thenReturn(testOrderDto);
     }
 
     @Test
