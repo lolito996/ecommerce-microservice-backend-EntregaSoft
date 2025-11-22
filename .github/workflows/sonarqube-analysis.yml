@@ -18,7 +18,7 @@ jobs:
         with:
           fetch-depth: 0  # Shallow clones should be disabled for better analysis
 
-      - name: Set up JDK 11
+      - name: Set up JDK 11 for build
         uses: actions/setup-java@v4
         with:
           java-version: '11'
@@ -36,6 +36,12 @@ jobs:
           mvn clean verify -DskipTests=false -DskipITs=true
           echo "JaCoCo reports generated in target/site/jacoco/jacoco.xml for each module"
           echo "Note: Integration tests are skipped in SonarQube analysis (use -DskipITs=false to run them)"
+
+      - name: Set up JDK 17 for SonarQube
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
       - name: SonarQube analysis
         env:
