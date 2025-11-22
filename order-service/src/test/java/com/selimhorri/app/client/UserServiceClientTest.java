@@ -95,21 +95,20 @@ class UserServiceClientTest {
     }
 
     @Test
-    @DisplayName("Should return fallback user when service throws exception")
-    void testFetchUser_WhenServiceThrowsException_ShouldReturnFallback() {
+    @DisplayName("Should throw exception when service throws exception (Circuit Breaker not active in unit test)")
+    void testFetchUser_WhenServiceThrowsException_ShouldThrowException() {
         // Given
         when(featureProperties.isEnrichRemoteData()).thenReturn(true);
-        when(featureProperties.isEnableResilienceLogs()).thenReturn(true);
         when(restTemplate.getForObject(anyString(), eq(UserDto.class)))
                 .thenThrow(new RestClientException("Service unavailable"));
 
-        // When
-        UserDto result = userServiceClient.fetchUser(userId);
-
-        // Then
-        assertNotNull(result);
-        assertEquals(userId, result.getUserId());
-        assertEquals("N/A", result.getFirstName());
+        // When & Then
+        // Note: Circuit Breaker fallback only works in Spring context with AOP enabled.
+        // In unit tests, the exception will propagate. The fallback will be tested in integration tests.
+        assertThrows(RestClientException.class, () -> {
+            userServiceClient.fetchUser(userId);
+        });
+        
         verify(featureProperties).isEnrichRemoteData();
         verify(restTemplate).getForObject(anyString(), eq(UserDto.class));
     }

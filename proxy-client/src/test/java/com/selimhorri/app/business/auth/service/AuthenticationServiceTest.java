@@ -14,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -63,7 +64,8 @@ class AuthenticationServiceTest {
     @DisplayName("Should authenticate successfully with valid credentials")
     void testAuthenticate_WithValidCredentials_ShouldReturnToken() {
         // Given
-        doNothing().when(authenticationManager).authenticate(any(UsernamePasswordAuthenticationToken.class));
+        Authentication authResult = new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+        when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class))).thenReturn(authResult);
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(userDetails);
         when(jwtService.generateToken(userDetails)).thenReturn(jwtToken);
 
