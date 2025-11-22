@@ -38,7 +38,7 @@ class ProductServiceClientTest {
         productDto = ProductDto.builder()
                 .productId(productId)
                 .productTitle("Test Product")
-                .productPrice(99.99)
+                .priceUnit(99.99)
                 .build();
     }
 

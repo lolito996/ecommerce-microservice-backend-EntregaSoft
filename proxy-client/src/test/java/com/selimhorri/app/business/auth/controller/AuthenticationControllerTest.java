@@ -39,7 +39,9 @@ class AuthenticationControllerTest {
         authenticationRequest.setPassword("password123");
 
         jwtToken = "test-jwt-token";
-        authenticationResponse = new AuthenticationResponse(jwtToken);
+        authenticationResponse = AuthenticationResponse.builder()
+                .jwtToken(jwtToken)
+                .build();
     }
 
     @Test
@@ -55,7 +57,7 @@ class AuthenticationControllerTest {
         assertNotNull(response);
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertNotNull(response.getBody());
-        assertEquals(jwtToken, response.getBody().getJwt());
+        assertEquals(jwtToken, response.getBody().getJwtToken());
         verify(authenticationService).authenticate(authenticationRequest);
     }
 

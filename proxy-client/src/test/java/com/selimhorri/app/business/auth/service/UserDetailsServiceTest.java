@@ -37,15 +37,16 @@ class UserDetailsServiceTest {
     void setUp() {
         username = "testuser";
 
-        credentialDto = new CredentialDto();
-        credentialDto.setCredentialId(1);
-        credentialDto.setUsername(username);
-        credentialDto.setPassword("password123");
-        credentialDto.setRoleBasedAuthority(RoleBasedAuthority.ROLE_USER);
-        credentialDto.setEnabled(true);
-        credentialDto.setAccountNonExpired(true);
-        credentialDto.setAccountNonLocked(true);
-        credentialDto.setCredentialsNonExpired(true);
+        credentialDto = CredentialDto.builder()
+                .credentialId(1)
+                .username(username)
+                .password("password123")
+                .roleBasedAuthority(RoleBasedAuthority.ROLE_USER)
+                .isEnabled(true)
+                .isAccountNonExpired(true)
+                .isAccountNonLocked(true)
+                .isCredentialsNonExpired(true)
+                .build();
     }
 
     @Test
