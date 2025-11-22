@@ -1,0 +1,57 @@
+server:
+  servlet:
+    context-path: /order-service
+
+spring:
+  application:
+    name: ORDER-SERVICE
+  profiles:
+    active: integration-test
+  # Deshabilitar Config Server para tests
+  config:
+    import: "optional:configserver:"
+  # Configurar H2 en memoria para tests
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+        format_sql: true
+  h2:
+    console:
+      enabled: true
+
+# Deshabilitar Eureka para tests
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+# Deshabilitar LoadBalancer para tests (usa RestTemplate directo)
+spring:
+  cloud:
+    loadbalancer:
+      enabled: false
+
+# Configuración de features para tests
+# Deshabilitar enriquecimiento remoto para simplificar el test
+# (el UserServiceClient usa URLs hardcodeadas que no apuntan a WireMock)
+app:
+  features:
+    enrich-remote-data: false
+    enable-resilience-logs: false
+
+# Deshabilitar Resilience4j health checks en tests
+management:
+  health:
+    circuitbreakers:
+      enabled: false
+

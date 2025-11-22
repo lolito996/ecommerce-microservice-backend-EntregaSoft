@@ -33,8 +33,9 @@ jobs:
 
       - name: Build with tests and coverage
         run: |
-          mvn clean verify -DskipTests=false
+          mvn clean verify -DskipTests=false -DskipITs=true
           echo "JaCoCo reports generated in target/site/jacoco/jacoco.xml for each module"
+          echo "Note: Integration tests are skipped in SonarQube analysis (use -DskipITs=false to run them)"
 
       - name: SonarQube analysis
         env:

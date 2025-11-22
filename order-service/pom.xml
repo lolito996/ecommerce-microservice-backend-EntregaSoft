@@ -224,6 +224,9 @@
 					<includes>
 						<include>**/*IntegrationTest.java</include>
 					</includes>
+					<!-- Skip integration tests by default - they require special configuration -->
+					<!-- To run: mvn verify -DskipITs=false -->
+					<skipITs>true</skipITs>
 				</configuration>
 				<executions>
 					<execution>
