@@ -148,4 +148,36 @@ class OrderServiceTest {
         assertEquals(testOrderDto.getOrderId(), result.getOrderId());
         verify(orderRepository).save(any(Order.class));
     }
+
+    @Test
+    void testUpdate_WithOrderId_ShouldReturnUpdatedOrder() {
+        // Given
+        Integer orderId = 1;
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(testOrder));
+        when(orderRepository.save(any(Order.class))).thenReturn(testOrder);
+
+        // When
+        OrderDto result = orderService.update(orderId, testOrderDto);
+
+        // Then
+        assertNotNull(result);
+        assertEquals(orderId, result.getOrderId());
+        verify(orderRepository).findById(orderId);
+        verify(orderRepository).save(any(Order.class));
+    }
+
+    @Test
+    void testDeleteById_ShouldCallRepositoryDelete() {
+        // Given
+        Integer orderId = 1;
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(testOrder));
+        doNothing().when(orderRepository).delete(any(Order.class));
+
+        // When
+        orderService.deleteById(orderId);
+
+        // Then
+        verify(orderRepository).findById(orderId);
+        verify(orderRepository).delete(any(Order.class));
+    }
 }

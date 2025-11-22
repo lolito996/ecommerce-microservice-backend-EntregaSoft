@@ -201,4 +201,21 @@ class UserServiceTest {
         assertTrue(exception.getMessage().contains("User with username: nonexistent not found"));
         verify(userRepository).findByCredentialUsername(username);
     }
+
+    @Test
+    void testUpdate_WithUserId_ShouldReturnUpdatedUser() {
+        // Given
+        Integer userId = 1;
+        when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+        when(userRepository.save(any(User.class))).thenReturn(testUser);
+
+        // When
+        UserDto result = userService.update(userId, testUserDto);
+
+        // Then
+        assertNotNull(result);
+        assertEquals(userId, result.getUserId());
+        verify(userRepository).findById(userId);
+        verify(userRepository).save(any(User.class));
+    }
 }

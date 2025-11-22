@@ -209,4 +209,36 @@ class ProductServiceTest {
         assertEquals("Updated Product", result.getProductTitle());
         verify(productRepository).save(any(Product.class));
     }
+
+    @Test
+    void testUpdate_WithProductId_ShouldReturnUpdatedProduct() {
+        // Given
+        Integer productId = 1;
+        when(productRepository.findById(productId)).thenReturn(Optional.of(testProduct));
+        when(productRepository.save(any(Product.class))).thenReturn(testProduct);
+
+        // When
+        ProductDto result = productService.update(productId, testProductDto);
+
+        // Then
+        assertNotNull(result);
+        assertEquals(productId, result.getProductId());
+        verify(productRepository).findById(productId);
+        verify(productRepository).save(any(Product.class));
+    }
+
+    @Test
+    void testDeleteById_ShouldCallRepositoryDelete() {
+        // Given
+        Integer productId = 1;
+        when(productRepository.findById(productId)).thenReturn(Optional.of(testProduct));
+        doNothing().when(productRepository).delete(any(Product.class));
+
+        // When
+        productService.deleteById(productId);
+
+        // Then
+        verify(productRepository).findById(productId);
+        verify(productRepository).delete(any(Product.class));
+    }
 }
