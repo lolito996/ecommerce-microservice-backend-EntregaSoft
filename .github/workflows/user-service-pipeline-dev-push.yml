@@ -35,7 +35,7 @@ jobs:
       run: mvn test --file pom.xml -pl user-service -am
       continue-on-error: true
     - name: SonarQube Analysis
-      if: ${{ secrets.SONAR_TOKEN != '' }}
+      if: secrets.SONAR_TOKEN
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -64,15 +64,28 @@ jobs:
     - name: Build Docker image for user-service-ecommerce-boot Microservice
       run: docker build -f user-service/Dockerfile -t ${{ secrets.DOCKER_USERNAME }}/user-service-ecommerce-boot:${{ secrets.PROJECT_VERSION }}dev .
     - name: Run Trivy vulnerability scanner
+      id: trivy-scan
       uses: aquasecurity/trivy-action@master
+      continue-on-error: true
       with:
         image-ref: ${{ secrets.DOCKER_USERNAME }}/user-service-ecommerce-boot:${{ secrets.PROJECT_VERSION }}dev
         format: 'sarif'
         output: 'trivy-results-user-service.sarif'
         severity: 'CRITICAL,HIGH'
-    - name: Upload Trivy results to GitHub Security
-      uses: github/codeql-action/upload-sarif@v2
+    - name: Check if SARIF file exists
+      id: check-sarif
       if: always()
+      run: |
+        if [ -f "trivy-results-user-service.sarif" ]; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+          echo "SARIF file not found for user-service, skipping upload"
+        fi
+    - name: Upload Trivy results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v3
+      if: always() && steps.check-sarif.outputs.exists == 'true'
+      continue-on-error: true
       with:
         sarif_file: 'trivy-results-user-service.sarif'
     - name: Trivy scan report

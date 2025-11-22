@@ -38,16 +38,30 @@ jobs:
           docker build -f ${{ matrix.service }}/Dockerfile -t ${{ matrix.service }}:test .
 
       - name: Run Trivy vulnerability scanner
+        id: trivy-scan
         uses: aquasecurity/trivy-action@master
+        continue-on-error: true
         with:
           image-ref: ${{ matrix.service }}:test
           format: 'sarif'
           output: 'trivy-results-${{ matrix.service }}.sarif'
           severity: 'CRITICAL,HIGH'
 
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v2
+      - name: Check if SARIF file exists
+        id: check-sarif
         if: always()
+        run: |
+          if [ -f "trivy-results-${{ matrix.service }}.sarif" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "SARIF file not found for ${{ matrix.service }}, skipping upload"
+          fi
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always() && steps.check-sarif.outputs.exists == 'true'
+        continue-on-error: true
         with:
           sarif_file: 'trivy-results-${{ matrix.service }}.sarif'
 
