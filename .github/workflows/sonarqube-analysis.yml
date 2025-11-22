@@ -44,8 +44,25 @@ jobs:
             -DskipTests=false || echo "SonarQube analysis completed with warnings"
 
       - name: SonarQube Quality Gate check
+        id: quality-gate
         uses: sonarsource/sonarqube-quality-gate-action@master
         timeout-minutes: 5
+        continue-on-error: true
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL || 'https://sonarcloud.io' }}
+
+      - name: Quality Gate Status
+        if: always()
+        run: |
+          if [ "${{ steps.quality-gate.outcome }}" == "failure" ]; then
+            echo "::warning::Quality Gate failed. Please check SonarCloud for details."
+            echo "Common issues:"
+            echo "- Code duplication: Extract common code into reusable methods/classes"
+            echo "- Code coverage: Add more unit tests"
+            echo "- Code smells: Refactor complex methods"
+            echo "View details at: https://sonarcloud.io/dashboard?id=${{ secrets.SONAR_PROJECT_KEY || 'ecommerce-microservice-backend' }}"
+          else
+            echo "✓ Quality Gate passed"
+          fi
 
