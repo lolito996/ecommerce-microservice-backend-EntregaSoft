@@ -215,7 +215,6 @@ class FavouriteServiceTest {
     @Test
     void testUpdate_WithFavouriteId_ShouldSucceed() {
         // Given
-        FavouriteId favouriteId = new FavouriteId(1, 4, LocalDateTime.now());
         FavouriteDto favouriteDto = FavouriteDto.builder()
                 .userId(1)
                 .productId(4)

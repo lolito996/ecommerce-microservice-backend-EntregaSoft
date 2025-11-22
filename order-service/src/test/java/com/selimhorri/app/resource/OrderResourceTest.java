@@ -60,7 +60,6 @@ class OrderResourceTest {
         void testFindAll_ShouldReturnAllOrders() throws Exception {
                 // Given
                 List<OrderDto> orders = Arrays.asList(testOrderDto);
-                DtoCollectionResponse<OrderDto> response = new DtoCollectionResponse<>(orders);
                 when(orderService.findAll()).thenReturn(orders);
 
                 // When & Then

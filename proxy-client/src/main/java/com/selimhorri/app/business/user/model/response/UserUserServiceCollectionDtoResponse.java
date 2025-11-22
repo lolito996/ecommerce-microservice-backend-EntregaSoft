@@ -17,6 +17,6 @@ import lombok.NoArgsConstructor;
 public class UserUserServiceCollectionDtoResponse implements Serializable {
 	
 	private static final long serialVersionUID = 1L;
-	private Collection<UserDto> collection;
+	private transient Collection<UserDto> collection; // transient to avoid serialization issues
 	
 }

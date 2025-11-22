@@ -13,7 +13,7 @@ import lombok.RequiredArgsConstructor;
 public class UserDetailsImpl implements UserDetails {
 	
 	private static final long serialVersionUID = 1L;
-	private final CredentialDto credential;
+	private final transient CredentialDto credential; // transient to avoid serialization issues
 	
 	@Override
 	public Collection<? extends GrantedAuthority> getAuthorities() {

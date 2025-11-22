@@ -58,7 +58,6 @@ class ProductResourceTest {
     void testFindAll_ShouldReturnAllProducts() throws Exception {
         // Given
         List<ProductDto> products = Arrays.asList(testProductDto);
-        DtoCollectionResponse<ProductDto> response = new DtoCollectionResponse<>(products);
         when(productService.findAll()).thenReturn(products);
 
         // When & Then

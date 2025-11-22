@@ -17,6 +17,6 @@ import lombok.NoArgsConstructor;
 public class VerificationUserTokenServiceCollectionDtoResponse implements Serializable {
 	
 	private static final long serialVersionUID = 1L;
-	private Collection<VerificationTokenDto> collection;
+	private transient Collection<VerificationTokenDto> collection; // transient to avoid serialization issues
 	
 }

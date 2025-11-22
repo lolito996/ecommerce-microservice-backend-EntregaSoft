@@ -43,7 +43,21 @@ public class AuthenticationServiceImpl implements AuthenticationService {
 	
 	@Override
 	public Boolean authenticate(final String jwt) {
-		return null;
+		// TODO: Implement JWT validation logic
+		// For now, return false as a safe default
+		// This method should validate the JWT token and return true if valid
+		try {
+			// Extract username from token and validate
+			final String username = this.jwtService.extractUsername(jwt);
+			if (username != null && !username.isEmpty()) {
+				final var userDetails = this.userDetailsService.loadUserByUsername(username);
+				return this.jwtService.validateToken(jwt, userDetails);
+			}
+			return false;
+		} catch (Exception e) {
+			log.warn("JWT authentication failed: {}", e.getMessage());
+			return false;
+		}
 	}
 	
 	

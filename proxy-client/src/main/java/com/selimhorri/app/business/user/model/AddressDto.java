@@ -29,7 +29,7 @@ public class AddressDto implements Serializable {
 	
 	@JsonProperty("user")
 	@JsonInclude(value = Include.NON_NULL)
-	private UserDto userDto;
+	private transient UserDto userDto; // transient to avoid serialization issues
 	
 }
 

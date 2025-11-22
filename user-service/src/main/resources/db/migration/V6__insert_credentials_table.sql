@@ -1,4 +1,6 @@
-
+-- NOTE: These are test/development bcrypt password hashes for demo purposes only
+-- In production, these should be generated securely and stored securely
+-- SonarQube flags these as security issues, but they are intentional test data
 INSERT INTO credentials
 (user_id, username, password, role, is_enabled) VALUES
 (1, 'selimhorri', '$2a$10$LK9Oiyv1vw3fIAHDrRGdXuIfizqoov6xGfq7QQFG1xzGyXwEy0z8u', 'ROLE_USER', true),

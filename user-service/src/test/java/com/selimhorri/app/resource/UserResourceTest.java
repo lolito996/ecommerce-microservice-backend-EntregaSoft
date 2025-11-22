@@ -50,7 +50,6 @@ class UserResourceTest {
     void testFindAll_ShouldReturnAllUsers() throws Exception {
         // Given
         List<UserDto> users = Arrays.asList(testUserDto);
-        DtoCollectionResponse<UserDto> response = new DtoCollectionResponse<>(users);
         when(userService.findAll()).thenReturn(users);
 
         // When & Then

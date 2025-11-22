@@ -57,7 +57,6 @@ class PaymentResourceTest {
     void testFindAll_ShouldReturnAllPayments() throws Exception {
         // Given
         List<PaymentDto> payments = Arrays.asList(testPaymentDto);
-        DtoCollectionResponse<PaymentDto> response = new DtoCollectionResponse<>(payments);
         when(paymentService.findAll()).thenReturn(payments);
 
         // When & Then

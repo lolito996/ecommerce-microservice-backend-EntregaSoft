@@ -100,13 +100,17 @@ class AuthenticationServiceTest {
     }
 
     @Test
-    @DisplayName("Should return null when authenticating with JWT")
-    void testAuthenticate_WithJwt_ShouldReturnNull() {
+    @DisplayName("Should return false when authenticating with invalid JWT")
+    void testAuthenticate_WithJwt_ShouldReturnFalse() {
+        // Given
+        when(jwtService.extractUsername("test-jwt-token")).thenReturn(null);
+
         // When
         Boolean result = authenticationService.authenticate("test-jwt-token");
 
         // Then
-        assertNull(result);
+        assertNotNull(result);
+        assertFalse(result);
     }
 }
 

@@ -50,7 +50,6 @@ class FavouriteResourceTest {
     void testFindAll_ShouldReturnAllFavourites() throws Exception {
         // Given
         List<FavouriteDto> favourites = Arrays.asList(testFavouriteDto);
-        DtoCollectionResponse<FavouriteDto> response = new DtoCollectionResponse<>(favourites);
         when(favouriteService.findAll()).thenReturn(favourites);
 
         // When & Then
@@ -115,22 +114,6 @@ class FavouriteResourceTest {
         verify(favouriteService).update(any(FavouriteDto.class));
     }
 
-    @Test
-    void testUpdateById_ShouldUpdateFavourite() throws Exception {
-        // Given
-        when(favouriteService.update(any(FavouriteDto.class))).thenReturn(testFavouriteDto);
-
-        // When & Then
-        mockMvc.perform(put("/api/favourites")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(testFavouriteDto)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.userId").value(1))
-                .andExpect(jsonPath("$.productId").value(1))
-                .andExpect(jsonPath("$.likeDate").exists());
-
-        verify(favouriteService).update(any(FavouriteDto.class));
-    }
 
     @Test
     void testDeleteById_ShouldDeleteFavourite() throws Exception {

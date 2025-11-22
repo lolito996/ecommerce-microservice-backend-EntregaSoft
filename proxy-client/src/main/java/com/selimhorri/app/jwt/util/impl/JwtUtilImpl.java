@@ -17,7 +17,11 @@ import io.jsonwebtoken.SignatureAlgorithm;
 @Component
 public class JwtUtilImpl implements JwtUtil {
 	
-	private static final String SECRET_KEY = "secret";
+	// JWT secret key should be configured via environment variable or config server
+	// For production, use: System.getenv("JWT_SECRET_KEY") or @Value("${jwt.secret.key}")
+	private static final String SECRET_KEY = System.getenv("JWT_SECRET_KEY") != null 
+			? System.getenv("JWT_SECRET_KEY") 
+			: System.getProperty("jwt.secret.key", "default-secret-key-change-in-production");
 	
 	@Override
 	public String extractUsername(final String token) {

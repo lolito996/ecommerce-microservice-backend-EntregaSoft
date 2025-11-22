@@ -21,7 +21,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PROTECTED)
 @Data
-abstract public class AbstractMappedEntity implements Serializable {
+public abstract class AbstractMappedEntity implements Serializable {
 	
 	private static final long serialVersionUID = 1L;
 	
