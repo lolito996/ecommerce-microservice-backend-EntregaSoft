@@ -2,9 +2,9 @@ name: SonarQube Code Analysis
 
 on:
   push:
-    branches: [ develop, main, master ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ develop, main, master ]
+    branches: [ main, master ]
 
 jobs:
   sonarqube:
@@ -83,16 +83,10 @@ jobs:
           
           # According to SonarCloud docs: 
           # - Main branch: No branch parameter needed (analyzed as main branch)
-          # - Long-lived branches: Use sonar.branch.name parameter
-          # - Short-lived branches: Use sonar.branch.name parameter
-          # Since develop is configured as main branch in SonarCloud, don't use branch parameter
-          if [ "$BRANCH_NAME" = "develop" ]; then
-            echo "Analyzing develop branch as MAIN BRANCH in SonarCloud (no branch parameter)"
+          # - Other branches: Use sonar.branch.name parameter
+          if [ "$BRANCH_NAME" = "main" ] || [ "$BRANCH_NAME" = "master" ]; then
+            echo "Analyzing $BRANCH_NAME as MAIN BRANCH in SonarCloud (no branch parameter)"
             # No branch parameter = analyzed as main branch
-          elif [ "$BRANCH_NAME" = "main" ] || [ "$BRANCH_NAME" = "master" ]; then
-            # If main/master exists, analyze as long-lived branch
-            SONAR_CMD="$SONAR_CMD -Dsonar.branch.name=$BRANCH_NAME"
-            echo "Analyzing $BRANCH_NAME as long-lived branch"
           else
             # Other branches as short-lived or long-lived depending on naming
             SONAR_CMD="$SONAR_CMD -Dsonar.branch.name=$BRANCH_NAME"
@@ -100,10 +94,19 @@ jobs:
           fi
           
           echo "Running SonarQube analysis..."
-          eval $SONAR_CMD || echo "SonarQube analysis completed with warnings"
+          eval $SONAR_CMD
+          
+          # Verify that report-task.txt was generated
+          if [ ! -f ".scannerwork/report-task.txt" ]; then
+            echo "::warning::SonarQube report-task.txt not found. Quality Gate check will be skipped."
+            echo "This may happen if the analysis failed or was incomplete."
+          else
+            echo "SonarQube report-task.txt generated successfully"
+          fi
 
       - name: SonarQube Quality Gate check
         id: quality-gate
+        if: hashFiles('.scannerwork/report-task.txt') != ''
         uses: sonarsource/sonarqube-quality-gate-action@master
         timeout-minutes: 5
         continue-on-error: true
