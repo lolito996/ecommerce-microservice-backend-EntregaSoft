@@ -43,11 +43,31 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL || 'https://sonarcloud.io' }}
         run: |
-          mvn sonar:sonar \
+          # Get the current branch name (works for both push and PR)
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            BRANCH_NAME="${{ github.head_ref }}"
+          else
+            BRANCH_NAME="${{ github.ref_name }}"
+          fi
+          echo "Analyzing branch: $BRANCH_NAME"
+          
+          # Build SonarQube command
+          SONAR_CMD="mvn sonar:sonar \
             -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY || 'ecommerce-microservice-backend' }} \
             -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }} \
             -Dsonar.host.url=${{ secrets.SONAR_HOST_URL || 'https://sonarcloud.io' }} \
-            -Dsonar.coverage.jacoco.xmlReportPaths=**/target/site/jacoco/jacoco.xml || echo "SonarQube analysis completed with warnings"
+            -Dsonar.coverage.jacoco.xmlReportPaths=**/target/site/jacoco/jacoco.xml"
+          
+          # For develop branch, analyze as main branch (no branch parameter)
+          # For other branches, use branch parameter
+          if [ "$BRANCH_NAME" != "develop" ]; then
+            SONAR_CMD="$SONAR_CMD -Dsonar.branch.name=$BRANCH_NAME"
+            echo "Analyzing as branch: $BRANCH_NAME"
+          else
+            echo "Analyzing develop branch as main branch in SonarCloud"
+          fi
+          
+          eval $SONAR_CMD || echo "SonarQube analysis completed with warnings"
 
       - name: SonarQube Quality Gate check
         id: quality-gate
