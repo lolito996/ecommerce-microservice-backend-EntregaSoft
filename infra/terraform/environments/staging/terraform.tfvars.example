@@ -1,0 +1,26 @@
+# Copia este archivo a terraform.tfvars y edita con tus valores
+
+# Región de Azure
+location = "eastus"
+
+# Número de nodos AKS
+aks_node_count = 2
+
+# Versión del chart de SonarQube
+sonarqube_chart_version = "10.6.0+3033"
+
+# Helm chart repository para microservicios (si usas uno personalizado)
+# helm_chart_repository = "https://tu-repo.com/charts"
+
+# Nombre del chart de microservicios
+# helm_chart_name = "ecommerce"
+
+# Versión del chart de microservicios
+# helm_chart_version = "1.0.0"
+
+# Tags adicionales (opcional)
+tags = {
+  project     = "ecommerce"
+  environment = "staging"
+  team        = "backend"
+}
