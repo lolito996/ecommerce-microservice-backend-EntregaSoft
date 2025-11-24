@@ -54,6 +54,14 @@ resilience4j:
         max-wait-duration: 1s
 
 management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  metrics:
+    export:
+      prometheus:
+        enabled: true
   health:
     circuitbreakers:
       enabled: true

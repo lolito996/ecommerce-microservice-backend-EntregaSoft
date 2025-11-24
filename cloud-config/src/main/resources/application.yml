@@ -32,7 +32,11 @@ management:
   endpoints:
     web:
       exposure:
-        include: "*"
+        include: health,info,prometheus,metrics
+  metrics:
+    export:
+      prometheus:
+        enabled: true
   health:
     circuitbreakers:
       enabled: true

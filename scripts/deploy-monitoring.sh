@@ -31,3 +31,4 @@ echo "Prometheus and Grafana deployed successfully!"
 echo "Prometheus: http://localhost:${PROMETHEUS_NODEPORT}"
 echo "Grafana: http://localhost:${GRAFANA_NODEPORT} (admin/admin)"
 
+
