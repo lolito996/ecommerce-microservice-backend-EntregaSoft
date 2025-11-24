@@ -1,0 +1,25 @@
+# Archivos de Terraform
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform/
+.terraform.lock.hcl
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Archivos sensibles
+*.pem
+*.key
+backend_config.txt
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

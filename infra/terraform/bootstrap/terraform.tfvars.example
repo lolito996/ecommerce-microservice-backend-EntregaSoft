@@ -1,0 +1,10 @@
+# Configuración de AWS para el backend de Terraform
+region              = "us-east-1"
+s3_bucket_name      = "ecom-terraform-state-123"  # Debe ser único globalmente
+dynamodb_table_name = "ecom-terraform-locks"
+
+tags = {
+  Project     = "ecommerce"
+  Environment = "shared"
+  ManagedBy   = "terraform"
+}
