@@ -31,9 +31,81 @@ jobs:
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
           restore-keys: ${{ runner.os }}-m2
 
-      - name: Build with tests and coverage
+      - name: Configure Maven settings with retry and alternative repositories
         run: |
-          mvn clean verify -DskipTests=false -DskipITs=true
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                    http://maven.apache.org/xsd/settings-1.0.0.xsd">
+            <profiles>
+              <profile>
+                <id>repositories</id>
+                <repositories>
+                  <repository>
+                    <id>central</id>
+                    <url>https://repo1.maven.org/maven2</url>
+                    <releases>
+                      <enabled>true</enabled>
+                      <updatePolicy>daily</updatePolicy>
+                    </releases>
+                    <snapshots>
+                      <enabled>false</enabled>
+                    </snapshots>
+                  </repository>
+                  <repository>
+                    <id>central-mirror</id>
+                    <url>https://repo.maven.apache.org/maven2</url>
+                    <releases>
+                      <enabled>true</enabled>
+                      <updatePolicy>daily</updatePolicy>
+                    </releases>
+                    <snapshots>
+                      <enabled>false</enabled>
+                    </snapshots>
+                  </repository>
+                </repositories>
+                <pluginRepositories>
+                  <pluginRepository>
+                    <id>central</id>
+                    <url>https://repo1.maven.org/maven2</url>
+                    <releases>
+                      <enabled>true</enabled>
+                    </releases>
+                    <snapshots>
+                      <enabled>false</enabled>
+                    </snapshots>
+                  </pluginRepository>
+                </pluginRepositories>
+              </profile>
+            </profiles>
+            <activeProfiles>
+              <activeProfile>repositories</activeProfile>
+            </activeProfiles>
+          </settings>
+          EOF
+
+      - name: Build with tests and coverage (with retry)
+        run: |
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if mvn clean verify -DskipTests=false -DskipITs=true -Dmaven.wagon.http.retryHandler.count=3 -Dmaven.wagon.httpconnectionManager.ttlSeconds=120; then
+              echo "Build successful"
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "Build failed, retrying... ($RETRY_COUNT/$MAX_RETRIES)"
+                sleep 10
+              else
+                echo "Build failed after $MAX_RETRIES attempts"
+                exit 1
+              fi
+            fi
+          done
           echo "JaCoCo reports generated in target/site/jacoco/jacoco.xml for each module"
           echo "Note: Integration tests are skipped in SonarQube analysis (use -DskipITs=false to run them)"
 
@@ -94,7 +166,23 @@ jobs:
           fi
           
           echo "Running SonarQube analysis..."
-          eval $SONAR_CMD
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if eval "$SONAR_CMD -Dmaven.wagon.http.retryHandler.count=3 -Dmaven.wagon.httpconnectionManager.ttlSeconds=120"; then
+              echo "SonarQube analysis successful"
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "SonarQube analysis failed, retrying... ($RETRY_COUNT/$MAX_RETRIES)"
+                sleep 10
+              else
+                echo "SonarQube analysis failed after $MAX_RETRIES attempts"
+                exit 1
+              fi
+            fi
+          done
           
           # Verify that report-task.txt was generated
           if [ ! -f ".scannerwork/report-task.txt" ]; then
