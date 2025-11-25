@@ -1,0 +1,245 @@
+# Global values
+global:
+  namespace: default
+  registry: docker.io/your-registry
+  imageTag: latest
+  imagePullPolicy: IfNotPresent
+  springProfile: dev
+  
+  # Service Discovery Configuration
+  eureka:
+    url: "http://service-discovery.{{ .Values.global.namespace }}.svc.cluster.local:8761/eureka/"
+  
+  # Cloud Config
+  cloudConfig:
+    url: "http://cloud-config.{{ .Values.global.namespace }}.svc.cluster.local:9296"
+  
+  # Zipkin
+  zipkin:
+    url: "http://zipkin:9411/"
+  
+  # Resource defaults
+  resources:
+    requests:
+      memory: "384Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  
+  # Health check defaults
+  healthCheck:
+    readiness:
+      initialDelaySeconds: 120
+      periodSeconds: 15
+      timeoutSeconds: 3
+      failureThreshold: 6
+    liveness:
+      initialDelaySeconds: 150
+      periodSeconds: 30
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+# Service Discovery
+service-discovery:
+  enabled: true
+  name: service-discovery
+  port: 8761
+  serviceType: NodePort
+  nodePort: 30001
+  replicas: 1
+  resources:
+    requests:
+      memory: "384Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  healthCheck:
+    path: /actuator/health
+
+# Cloud Config
+cloud-config:
+  enabled: true
+  name: cloud-config
+  port: 9296
+  serviceType: ClusterIP
+  replicas: 1
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "768Mi"
+      cpu: "500m"
+  healthCheck:
+    path: /actuator/health
+
+# API Gateway
+api-gateway:
+  enabled: true
+  name: api-gateway
+  port: 8080
+  serviceType: NodePort
+  nodePort: 30000
+  replicas: 1
+  healthCheck:
+    path: /actuator/health
+
+# User Service
+user-service:
+  enabled: true
+  name: user-service
+  port: 8700
+  serviceType: ClusterIP
+  replicas: 1
+  healthCheck:
+    path: /user-service/actuator/health
+
+# Product Service
+product-service:
+  enabled: true
+  name: product-service
+  port: 8500
+  serviceType: ClusterIP
+  replicas: 1
+  healthCheck:
+    path: /product-service/actuator/health
+
+# Order Service
+order-service:
+  enabled: true
+  name: order-service
+  port: 8300
+  serviceType: ClusterIP
+  replicas: 1
+  healthCheck:
+    path: /order-service/actuator/health
+
+# Payment Service
+payment-service:
+  enabled: true
+  name: payment-service
+  port: 8400
+  serviceType: ClusterIP
+  replicas: 1
+  healthCheck:
+    path: /payment-service/actuator/health
+
+# Shipping Service
+shipping-service:
+  enabled: true
+  name: shipping-service
+  port: 8600
+  serviceType: ClusterIP
+  replicas: 1
+  healthCheck:
+    path: /shipping-service/actuator/health
+
+# Favourite Service
+favourite-service:
+  enabled: true
+  name: favourite-service
+  port: 8800
+  serviceType: ClusterIP
+  replicas: 1
+  healthCheck:
+    path: /favourite-service/actuator/health
+
+# Proxy Client
+proxy-client:
+  enabled: true
+  name: proxy-client
+  port: 8900
+  serviceType: ClusterIP
+  replicas: 1
+  healthCheck:
+    path: /proxy-client/actuator/health
+
+# Prometheus
+prometheus:
+  enabled: true
+  replicas: 1
+  serviceType: NodePort
+  nodePort: 30090
+  retention: 200h
+  image:
+    repository: prom/prometheus
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+  scrapeConfigs:
+    - jobName: api-gateway
+      metricsPath: /actuator/prometheus
+      target: api-gateway:8080
+    - jobName: user-service
+      metricsPath: /actuator/prometheus
+      target: user-service:8700
+    - jobName: product-service
+      metricsPath: /actuator/prometheus
+      target: product-service:8500
+    - jobName: order-service
+      metricsPath: /actuator/prometheus
+      target: order-service:8300
+    - jobName: shipping-service
+      metricsPath: /actuator/prometheus
+      target: shipping-service:8600
+    - jobName: payment-service
+      metricsPath: /actuator/prometheus
+      target: payment-service:8400
+    - jobName: favourite-service
+      metricsPath: /actuator/prometheus
+      target: favourite-service:8800
+    - jobName: service-discovery
+      metricsPath: /actuator/prometheus
+      target: service-discovery:8761
+    - jobName: cloud-config
+      metricsPath: /actuator/prometheus
+      target: cloud-config:9296
+
+# Grafana
+grafana:
+  enabled: true
+  replicas: 1
+  serviceType: NodePort
+  nodePort: 30300
+  adminUser: admin
+  adminPassword: admin
+  plugins:
+    - grafana-piechart-panel
+  image:
+    repository: grafana/grafana
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+# Zipkin
+zipkin:
+  enabled: true
+  replicas: 1
+  serviceType: NodePort
+  nodePort: 30411
+  image:
+    repository: openzipkin/zipkin
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "384Mi"
+      cpu: "500m"
+

@@ -1,0 +1,143 @@
+# Production environment values
+global:
+  namespace: production
+  registry: docker.io/your-registry
+  imageTag: prod
+  imagePullPolicy: IfNotPresent
+  springProfile: prod
+  
+  # Production resource defaults
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+# Production replicas
+service-discovery:
+  replicas: 2
+  serviceType: ClusterIP  # Use LoadBalancer or Ingress in production
+
+cloud-config:
+  replicas: 2
+  resources:
+    requests:
+      memory: "768Mi"
+      cpu: "500m"
+    limits:
+      memory: "1.5Gi"
+      cpu: "1000m"
+
+api-gateway:
+  replicas: 3
+  serviceType: LoadBalancer  # Or use Ingress
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+user-service:
+  replicas: 3
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+product-service:
+  replicas: 3
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+order-service:
+  replicas: 3
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+payment-service:
+  replicas: 3
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+shipping-service:
+  replicas: 2
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+favourite-service:
+  replicas: 2
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+proxy-client:
+  replicas: 2
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+prometheus:
+  replicas: 1
+  serviceType: ClusterIP  # Use Ingress in production
+  retention: 720h  # 30 days
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "1000m"
+    limits:
+      memory: "2Gi"
+      cpu: "2000m"
+
+grafana:
+  replicas: 1
+  serviceType: ClusterIP  # Use Ingress in production
+  adminPassword: "CHANGE_ME_IN_PRODUCTION"  # Use secrets in production
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+zipkin:
+  replicas: 1
+  serviceType: ClusterIP  # Use Ingress in production
+
+
+

@@ -1,0 +1,65 @@
+{{- if .Values.zipkin.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zipkin
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: zipkin
+spec:
+  replicas: {{ .Values.zipkin.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: zipkin
+  template:
+    metadata:
+      labels:
+        app: zipkin
+    spec:
+      containers:
+      - name: zipkin
+        image: {{ .Values.zipkin.image.repository }}:{{ .Values.zipkin.image.tag }}
+        imagePullPolicy: {{ .Values.zipkin.image.pullPolicy }}
+        ports:
+        - containerPort: 9411
+        resources:
+          {{- toYaml .Values.zipkin.resources | nindent 10 }}
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 9411
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          timeoutSeconds: 3
+          failureThreshold: 6
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 9411
+          initialDelaySeconds: 90
+          periodSeconds: 30
+          timeoutSeconds: 3
+          failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zipkin
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: zipkin
+spec:
+  selector:
+    app: zipkin
+  ports:
+  - port: 9411
+    targetPort: 9411
+    {{- if and (eq .Values.zipkin.serviceType "NodePort") .Values.zipkin.nodePort }}
+    nodePort: {{ .Values.zipkin.nodePort }}
+    {{- end }}
+    protocol: TCP
+  type: {{ .Values.zipkin.serviceType | default "ClusterIP" }}
+{{- end }}
+
+
+

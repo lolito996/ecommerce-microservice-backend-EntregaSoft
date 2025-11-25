@@ -1,0 +1,37 @@
+# Staging environment values
+global:
+  namespace: staging
+  registry: docker.io/your-registry
+  imageTag: staging
+  imagePullPolicy: IfNotPresent
+  springProfile: stage
+
+# Increase replicas for staging
+service-discovery:
+  replicas: 1
+  nodePort: 30001
+
+api-gateway:
+  replicas: 2
+  nodePort: 30000
+
+user-service:
+  replicas: 2
+
+product-service:
+  replicas: 2
+
+order-service:
+  replicas: 2
+
+prometheus:
+  nodePort: 30090
+
+grafana:
+  nodePort: 30300
+
+zipkin:
+  nodePort: 30411
+
+
+

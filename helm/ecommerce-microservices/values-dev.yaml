@@ -1,0 +1,25 @@
+# Development environment values
+global:
+  namespace: dev
+  registry: docker.io/your-registry
+  imageTag: latest
+  imagePullPolicy: Always
+  springProfile: dev
+
+service-discovery:
+  nodePort: 30001
+
+api-gateway:
+  nodePort: 30000
+
+prometheus:
+  nodePort: 30090
+
+grafana:
+  nodePort: 30300
+
+zipkin:
+  nodePort: 30411
+
+
+

@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: micro-config
+  namespace: {{ .Values.global.namespace }}
+data:
+  SPRING_PROFILES_ACTIVE: "{{ .Values.global.springProfile | default "dev" }}"
+  JAVA_OPTS: "-Xms256m -Xmx512m"
+  
+  # Service Discovery
+  EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE: "{{ .Values.global.eureka.url }}"
+  EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: "{{ .Values.global.eureka.url }}"
+  
+  EUREKA_INSTANCE_PREFER_IP_ADDRESS: "true"
+  EUREKA_INSTANCE_HOSTNAME: "${spring.application.name}.{{ .Values.global.namespace }}.svc.cluster.local"
+  
+  # Cloud Config
+  SPRING_CLOUD_CONFIG_URI: "{{ .Values.global.cloudConfig.url }}"
+  SPRING_ZIPKIN_BASE_URL: "{{ .Values.global.zipkin.url }}"
+  
+  # URLs de servicios para la comunicación interna
+  USER_SERVICE_HOST: "http://user-service.{{ .Values.global.namespace }}.svc.cluster.local:8700"
+  PRODUCT_SERVICE_HOST: "http://product-service.{{ .Values.global.namespace }}.svc.cluster.local:8500"
+  ORDER_SERVICE_HOST: "http://order-service.{{ .Values.global.namespace }}.svc.cluster.local:8300"
+  FAVOURITE_SERVICE_HOST: "http://favourite-service.{{ .Values.global.namespace }}.svc.cluster.local:8800"
+  SHIPPING_SERVICE_HOST: "http://shipping-service.{{ .Values.global.namespace }}.svc.cluster.local:8600"
+  PAYMENT_SERVICE_HOST: "http://payment-service.{{ .Values.global.namespace }}.svc.cluster.local:8400"
+  PROXY_CLIENT_HOST: "http://proxy-client.{{ .Values.global.namespace }}.svc.cluster.local:8900"
+  SPRING_CONFIG_IMPORT: "optional:configserver:{{ .Values.global.cloudConfig.url }}/"
+
+
+

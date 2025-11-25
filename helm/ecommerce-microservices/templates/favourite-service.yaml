@@ -1,0 +1,8 @@
+{{- if index .Values "favourite-service" "enabled" }}
+{{- $service := index .Values "favourite-service" }}
+{{ include "microservice.deployment" (dict "name" $service.name "port" $service.port "replicas" $service.replicas "resources" $.Values.global.resources "healthCheck" (dict "path" ($service.healthCheck.path | default "/favourite-service/actuator/health") "readiness" $.Values.global.healthCheck.readiness "liveness" $.Values.global.healthCheck.liveness) "Values" $.Values "Chart" $.Chart "Release" $.Release) }}
+
+---
+{{ include "microservice.service" (dict "name" $service.name "port" $service.port "serviceType" $service.serviceType "nodePort" nil "Values" $.Values "Chart" $.Chart "Release" $.Release) }}
+{{- end }}
+
