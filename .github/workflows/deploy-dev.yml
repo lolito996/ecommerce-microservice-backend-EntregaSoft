@@ -42,7 +42,7 @@ jobs:
           echo "JAVA_HOME: $JAVA_HOME"
           java -version
           chmod +x ./mvnw
-          ./mvnw -B -T 1C verify -Dtest="*ServiceImplTest" -DfailIfNoTests=false
+          ./mvnw -B -T 1C verify -Dtest="*ServiceImplTest" -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false
 
       - name: Upload test reports
         if: always()
