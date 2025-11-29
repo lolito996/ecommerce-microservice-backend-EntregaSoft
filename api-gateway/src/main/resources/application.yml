@@ -1,4 +1,3 @@
-
 server:
   servlet:
     context-path: /
@@ -21,7 +20,7 @@ spring:
         add-to-simple-url-handler-mapping: true
         cors-configurations:
           '[/**]':
-            allowed-origins: "${CLIENT_HOST:http://localhost:4200}"
+            allowed-origin-patterns: "*"
             allowed-headers: "*"
             exposed-headers: "*"
             allow-credentials: true
@@ -45,6 +44,11 @@ spring:
         uri: lb://PRODUCT-SERVICE
         predicates:
         - Path=/product-service/**
+        filters:
+        - name: CircuitBreaker
+          args:
+            name: apiGateway
+            fallbackUri: forward:/fallback/product
       - id: SHIPPING-SERVICE
         uri: lb://SHIPPING-SERVICE
         predicates:
@@ -61,15 +65,6 @@ spring:
         uri: lb://PROXY-CLIENT
         predicates:
         - Path=/app/**
-
-eureka:
-  client:
-    service-url:
-      defaultZone: ${EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:http://localhost:8761/eureka/}
-    register-with-eureka: true
-    fetch-registry: true
-    healthcheck:
-      enabled: true
 
 resilience4j:
   circuitbreaker:
@@ -89,24 +84,10 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,prometheus,metrics
-  metrics:
-    export:
-      prometheus:
-        enabled: true
+        include: health,info,prometheus
   health:
     circuitbreakers:
       enabled: true
   endpoint:
     health:
       show-details: always
-
-
-
-
-
-
-
-
- 
- 

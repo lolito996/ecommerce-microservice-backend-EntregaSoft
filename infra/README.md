@@ -1,112 +1,277 @@
-# Infraestructura - E-commerce Microservices
+# Terraform Infrastructure - E-Commerce Microservices
 
-## 📁 Contenido
-
-Este directorio contiene toda la infraestructura como código (IaC) para el proyecto e-commerce.
-
-### Terraform (Azure)
-
-La carpeta `terraform/` contiene la configuración completa de Terraform para desplegar la infraestructura en Microsoft Azure.
-
-**Inicio rápido**: Ver [`terraform/QUICKSTART.md`](terraform/QUICKSTART.md)
-
-**Documentos principales**:
-- [`terraform/README.md`](terraform/README.md) - Guía completa de uso
-- [`terraform/ENTREGA.md`](terraform/ENTREGA.md) - Documento de entrega del proyecto
-- [`terraform/architecture.md`](terraform/architecture.md) - Arquitectura detallada
-- [`terraform/COMMANDS.md`](terraform/COMMANDS.md) - Referencia de comandos
-
-**Scripts de ayuda**:
-- `terraform/deploy.ps1` - Despliegue automatizado
-- `terraform/validate-names.ps1` - Validación de nombres únicos
-- `terraform/backend-bootstrap.ps1` - Bootstrap con Azure CLI (legacy)
-
-### Estructura
+## 📁 Estructura del Proyecto
 
 ```
 infra/
-└── terraform/                    # Infraestructura como código
-    ├── bootstrap/               # Backend remoto (ejecutar primero)
-    ├── modules/                 # Módulos reutilizables
-    │   ├── resource_group/
-    │   ├── storage_account/
-    │   ├── aks/
-    │   └── acr/
-    ├── environments/            # Configuraciones por ambiente
-    │   ├── dev/
-    │   ├── staging/
-    │   └── prod/
-    └── diagrams/                # Diagramas de arquitectura
+├── modules/                      # Módulos reutilizables
+│   ├── aws-vpc/                 # VPC, subnets, NAT, IGW
+│   ├── aws-ecs/                 # ECS cluster y roles IAM
+│   ├── aws-alb/                 # Application Load Balancer
+│   ├── aws-security-groups/     # Security groups
+│   ├── aws-rds/                 # Base de datos PostgreSQL
+│   └── aws-s3-backend/          # Backend remoto S3+DynamoDB
+│
+├── aws-backend-bootstrap/        # Inicialización del backend
+│   ├── main.tf
+│   ├── variables.tf
+│   └── outputs.tf
+│
+├── aws-environments/             # Configuraciones por ambiente
+│   ├── dev/                     # Desarrollo
+│   ├── stage/                   # Staging/QA
+│   └── prod/                    # Producción
+│
+├── scripts/                      # Scripts de automatización
+│   ├── init-backend.ps1         # Inicializar backend
+│   ├── deploy-environment.ps1   # Desplegar ambiente
+│   └── validate-terraform.ps1   # Validar configuración
+│
+└── AWS_INFRASTRUCTURE_GUIDE.md   # Documentación completa
 ```
 
-### Recursos Creados
+## 🚀 Quick Start
 
-Por cada ambiente (dev/staging/prod):
-- ✅ Resource Group
-- ✅ Azure Kubernetes Service (AKS)
-- ✅ Azure Container Registry (ACR)
-- ✅ Storage Account (opcional)
-- ✅ Managed Identity
-
-Backend compartido:
-- ✅ Storage Account para estado remoto de Terraform
-- ✅ Container `tfstate` con keys por ambiente
-
-### Despliegue Rápido
+### 1. Prerequisitos
 
 ```powershell
-cd terraform
+# Instalar Terraform
+choco install terraform
 
-# 1. Validar nombres
-.\validate-names.ps1 -storageAccountName "miNombre" -acrName "miACR"
+# Instalar AWS CLI
+choco install awscli
 
-# 2. Bootstrap
-cd bootstrap
-cp terraform.tfvars.example terraform.tfvars
-# Editar terraform.tfvars
-terraform init && terraform apply
-
-# 3. Ambiente
-cd ..\environments\dev
-cp terraform.tfvars.example terraform.tfvars
-# Editar terraform.tfvars y backend.tfvars
-terraform init -backend-config=backend.tfvars
-terraform apply
-
-# 4. Conectar
-az aks get-credentials --resource-group ecom-dev-rg --name ecom-dev-aks
-kubectl apply -f ..\..\..\..\k8s\base\
+# Configurar credenciales AWS
+aws configure
 ```
 
-### Requisitos
+### 2. Inicializar Backend (solo una vez)
 
-- Azure CLI (`az`)
-- Terraform (`>= 1.0`)
-- Kubectl (para desplegar en AKS)
-- Suscripción de Azure activa
+```powershell
+cd infra/scripts
+.\init-backend.ps1
+```
 
-### Soporte
+Esto crea:
+- S3 bucket para Terraform state
+- DynamoDB table para state locking
+- IAM policies necesarias
 
-Para problemas o dudas, consultar:
-1. `terraform/QUICKSTART.md` - Inicio rápido
-2. `terraform/COMMANDS.md` - Comandos comunes
-3. `terraform/README.md` - Guía completa
+### 3. Actualizar Backend Config
+
+Después de ejecutar `init-backend.ps1`, copia el bucket name y actualiza en cada ambiente:
+
+```terraform
+# En infra/aws-environments/{dev,stage,prod}/main.tf
+terraform {
+  backend "s3" {
+    bucket         = "ecommerce-terraform-state-XXXXXXXX"  # Actualizar aquí
+    key            = "{environment}/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "ecommerce-terraform-locks"
+    encrypt        = true
+  }
+}
+```
+
+### 4. Desplegar Ambiente
+
+```powershell
+# Development
+.\deploy-environment.ps1 -Environment dev
+
+# Staging
+.\deploy-environment.ps1 -Environment stage
+
+# Production (requiere confirmación)
+.\deploy-environment.ps1 -Environment prod
+```
+
+## 🔧 Comandos Útiles
+
+```powershell
+# Validar configuración
+.\validate-terraform.ps1
+
+# Ver plan sin aplicar
+.\deploy-environment.ps1 -Environment dev -Plan
+
+# Auto-aprobar (útil para CI/CD)
+.\deploy-environment.ps1 -Environment dev -AutoApprove
+
+# Destruir ambiente
+.\deploy-environment.ps1 -Environment dev -Destroy
+```
+
+## 🏗️ Arquitectura
+
+### Componentes Principales
+
+**Networking**:
+- VPC aislada por ambiente
+- Subnets públicas (ALB, NAT)
+- Subnets privadas (ECS, RDS)
+- Internet Gateway + NAT Gateways
+
+**Compute**:
+- ECS Fargate (serverless)
+- Microservicios:
+  - API Gateway (8080)
+  - Service Discovery/Eureka (8761)
+  - User Service (8700)
+  - Product Service (8500)
+  - Order Service (8300)
+  - Payment Service (8400)
+  - Shipping Service (8600)
+  - Favourite Service (8800)
+  - Monitoring (Prometheus, Grafana)
+  - Tracing (Zipkin)
+
+**Database**:
+- RDS PostgreSQL
+- Multi-AZ en producción
+- Automated backups
+- Secrets Manager para credenciales
+
+**Load Balancing**:
+- Application Load Balancer
+- Target groups por servicio
+- Health checks
+- HTTPS (prod)
+
+## 📊 Ambientes
+
+| Ambiente | VPC CIDR | AZs | NAT | RDS | Costo/mes |
+|----------|----------|-----|-----|-----|-----------|
+| Dev | 10.0.0.0/16 | 2 | ❌ | Opcional | ~$50-100 |
+| Stage | 10.1.0.0/16 | 2 | ✅ | Single-AZ | ~$200-300 |
+| Prod | 10.2.0.0/16 | 3 | ✅ | Multi-AZ | ~$500-800 |
+
+## 🔐 Seguridad
+
+- **VPC Isolation**: Ambientes completamente separados
+- **Security Groups**: Reglas restrictivas
+- **IAM Roles**: Sin credenciales hardcoded
+- **Encryption**: RDS y S3 encriptados
+- **Secrets Manager**: Passwords seguros
+- **VPC Flow Logs**: Auditoría de red (stage/prod)
+
+## 📝 Documentación Completa
+
+Ver [AWS_INFRASTRUCTURE_GUIDE.md](./AWS_INFRASTRUCTURE_GUIDE.md) para:
+- Diagramas detallados de arquitectura
+- Costos estimados
+- Guía de troubleshooting
+- Mejores prácticas
+- Mantenimiento y operaciones
+
+## 🧪 Testing
+
+```powershell
+# Validar todos los ambientes
+.\validate-terraform.ps1 -Target all
+
+# Validar ambiente específico
+.\validate-terraform.ps1 -Target dev
+
+# Validar solo backend
+.\validate-terraform.ps1 -Target backend
+```
+
+## 🔄 CI/CD Integration
+
+### GitHub Actions Example
+
+```yaml
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches: [main]
+    paths: ['infra/**']
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      
+      - name: Terraform Init
+        run: terraform init
+        working-directory: infra/aws-environments/dev
+        
+      - name: Terraform Plan
+        run: terraform plan
+        working-directory: infra/aws-environments/dev
+        
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve
+        working-directory: infra/aws-environments/dev
+```
+
+## 🆘 Troubleshooting
+
+### Error: Backend not configured
+```powershell
+# Ejecutar init-backend.ps1 primero
+.\scripts\init-backend.ps1
+
+# Luego actualizar backend config en main.tf
+```
+
+### Error: AWS credentials not found
+```powershell
+aws configure
+# Ingresar Access Key ID y Secret Access Key
+```
+
+### Error: Terraform init failed
+```powershell
+# Limpiar archivos temporales
+Remove-Item -Recurse -Force .terraform
+Remove-Item .terraform.lock.hcl
+
+# Reintentar
+terraform init
+```
+
+### Ver logs de ECS
+```powershell
+aws logs tail /ecs/{environment}-ecommerce --follow
+```
+
+### Ver estado de RDS
+```powershell
+aws rds describe-db-instances --db-instance-identifier {environment}-ecommerce-db
+```
+
+## 📚 Referencias
+
+- [Terraform AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+- [AWS ECS Documentation](https://docs.aws.amazon.com/ecs/)
+- [AWS RDS Documentation](https://docs.aws.amazon.com/rds/)
+- [Terraform Best Practices](https://www.terraform-best-practices.com/)
+
+## 👥 Soporte
+
+Para preguntas o problemas:
+1. Consultar [AWS_INFRASTRUCTURE_GUIDE.md](./AWS_INFRASTRUCTURE_GUIDE.md)
+2. Revisar logs en CloudWatch
+3. Verificar Terraform state: `terraform show`
+4. Contactar al equipo DevOps
 
 ---
 
-**Estado**: ✅ Producción  
-**Cloud**: Microsoft Azure  
-**IaC**: Terraform  
-**Última actualización**: Noviembre 2025
-![alt text](<Imagen de WhatsApp 2025-11-23 a las 18.45.13_94c46192.jpg>)
-
-
-![alt text](<Imagen de WhatsApp 2025-11-23 a las 18.43.25_5bd85aef.jpg>)
-
-![alt text](<Imagen de WhatsApp 2025-11-23 a las 18.42.18_8264c588.jpg>)
-
-![alt text](<Imagen de WhatsApp 2025-11-23 a las 18.42.04_4b5288d6.jpg>)
-
-![alt text](<Imagen de WhatsApp 2025-11-23 a las 19.24.45_690f20f1.jpg>)
-
-![alt text](image-1.png)
+**Versión**: 1.0.0  
+**Última actualización**: 28 de noviembre de 2025

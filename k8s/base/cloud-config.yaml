@@ -35,6 +35,9 @@ spec:
           envFrom:
             - configMapRef:
                 name: micro-config
+          env:
+            - name: SPRING_APPLICATION_JSON
+              value: '{"eureka":{"client":{"serviceUrl":{"defaultZone":"http://service-discovery.${NAMESPACE}.svc.cluster.local:8761/eureka/"}}}}'
           resources:
             requests:
               memory: "512Mi"

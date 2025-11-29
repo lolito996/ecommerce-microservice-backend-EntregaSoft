@@ -1,0 +1,61 @@
+# Terraform files
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!terraform.tfvars.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Backend configuration (generated)
+backend-config-generated.txt
+backend-config.txt
+
+# Deployment info
+deployment-info.json
+
+# Lock files (keep these in version control)
+# .terraform.lock.hcl
+
+# Local environment files
+.env
+.env.local
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+
+# SSH keys
+*.pem
+*.key
+
+# Archives
+*.zip
+*.tar.gz
+
+# Graph outputs
+graph.png
+graph.svg
+graph.dot
