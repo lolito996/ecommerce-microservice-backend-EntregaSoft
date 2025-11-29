@@ -34,34 +34,22 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Set up JDK 11
-        uses: actions/setup-java@v4
-        with:
-          java-version: '11'
-          distribution: 'temurin'
-          cache: maven
-
-      - name: Build and Push Docker Images
+      - name: Verify Docker Images Exist
         run: |
           services=("service-discovery" "cloud-config" "api-gateway" "user-service" "product-service" "order-service")
           
+          echo "🔍 Verificando que las imágenes existan en Docker Hub..."
           for service in "${services[@]}"; do
-            echo "🔨 Building $service..."
-            cd $service
+            echo "Checking ${{ secrets.DOCKER_USERNAME }}/$service:latest"
             
-            # Build with Maven
-            ./mvnw clean package -DskipTests
+            # Pull image to verify it exists
+            docker pull ${{ secrets.DOCKER_USERNAME }}/$service:latest
             
-            # Build Docker image
-            docker build -t ${{ secrets.DOCKER_USERNAME }}/$service:latest .
-            docker build -t ${{ secrets.DOCKER_USERNAME }}/$service:${{ github.sha }} .
-            
-            # Push to Docker Hub
-            docker push ${{ secrets.DOCKER_USERNAME }}/$service:latest
+            # Tag with commit SHA for deployment tracking
+            docker tag ${{ secrets.DOCKER_USERNAME }}/$service:latest ${{ secrets.DOCKER_USERNAME }}/$service:${{ github.sha }}
             docker push ${{ secrets.DOCKER_USERNAME }}/$service:${{ github.sha }}
             
-            echo "✅ $service pushed successfully"
-            cd ..
+            echo "✅ $service image verified and tagged"
           done
 
       - name: Get DB Password from Secrets Manager
