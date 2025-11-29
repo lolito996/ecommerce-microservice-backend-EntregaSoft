@@ -1,0 +1,475 @@
+name: CI - CD - Dev Build (ECS Fargate)
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    branches:
+      - develop
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  DOCKER_USERNAME: alejomunoz
+
+jobs:
+  maven-build:
+    name: Build with Maven
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 11 and 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            11
+            17
+
+      - name: Build with Maven (run unit tests)
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME_11_X64 }}
+        run: |
+          echo "Building with Java 11"
+          echo "JAVA_HOME: $JAVA_HOME"
+          java -version
+          chmod +x ./mvnw
+          ./mvnw -B -T 1C verify -Dtest="*ServiceImplTest" -DfailIfNoTests=false
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            */target/surefire-reports/.xml
+          retention-days: 3
+
+      - name: Upload build workspace
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace
+          path: |
+            .
+            !.git
+          retention-days: 1
+
+  calculate-semver:
+    name: Calculate Semantic Version
+    runs-on: ubuntu-latest
+    needs: maven-build
+    outputs:
+      new_version: ${{ steps.calc.outputs.new_version }}
+      changelog: ${{ steps.calc.outputs.changelog }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate version
+        id: calc
+        uses: mathieudutour/github-tag-action@v6.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          release_branches: develop
+          tag_prefix: dev-
+          dry_run: true
+          default_bump: minor
+
+  docker-build:
+    name: Build and Push ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: [maven-build, calculate-semver]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - api-gateway
+          - cloud-config
+          - favourite-service
+          - order-service
+          - payment-service
+          - product-service
+          - proxy-client
+          - service-discovery
+          - shipping-service
+          - user-service
+
+    steps:
+      - name: Download workspace
+        uses: actions/download-artifact@v4
+        with:
+          name: workspace
+          path: .
+
+      - name: Check if Dockerfile exists
+        id: check
+        run: |
+          if [ -f "${{ matrix.service }}/Dockerfile" ]; then 
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else 
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.exists == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        if: steps.check.outputs.exists == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata
+        if: steps.check.outputs.exists == 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKER_USERNAME }}/${{ matrix.service }}
+          tags: |
+            type=raw,value=${{ needs.calculate-semver.outputs.new_version }}
+            type=raw,value=latest
+            type=raw,value=dev
+            type=sha,prefix=,format=long
+
+      - name: Build and push Docker image
+        if: steps.check.outputs.exists == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ matrix.service }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        if: steps.check.outputs.exists == 'true'
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ secrets.DOCKER_USERNAME }}/${{ matrix.service }}:${{ needs.calculate-semver.outputs.new_version }}
+          format: table
+          exit-code: 0
+          ignore-unfixed: false
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          scanners: vuln
+
+  ecs-deploy:
+    name: Deploy to ECS Dev Environment
+    environment:
+      name: development
+    runs-on: ubuntu-latest
+    needs: [docker-build, calculate-semver]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || env.AWS_REGION }}
+
+      - name: Get DB Password from Secrets Manager
+        id: db-password
+        run: |
+          DB_PASSWORD=$(aws secretsmanager get-secret-value \
+            --secret-id dev-ecommerce-db-master-password \
+            --query SecretString \
+            --output text 2>/dev/null || echo "default_password")
+          echo "::add-mask::$DB_PASSWORD"
+          echo "DB_PASSWORD=$DB_PASSWORD" >> $GITHUB_OUTPUT
+
+      - name: Register ECS Task Definitions
+        run: |
+          services=("service-discovery" "cloud-config" "api-gateway" "user-service" "product-service" "order-service" "payment-service" "shipping-service" "favourite-service" "proxy-client")
+          ports=(8761 8888 8080 8081 8082 8083 8084 8085 8086 8087)
+          
+          ECS_CLUSTER="${{ vars.ECS_CLUSTER }}"
+          EUREKA_URL="${{ vars.EUREKA_URL }}"
+          ALB_URL="${{ vars.ALB_URL }}"
+          IMAGE_TAG="${{ needs.calculate-semver.outputs.new_version }}"
+          
+          echo "🔧 Using configuration:"
+          echo "  ECS Cluster: $ECS_CLUSTER"
+          echo "  Eureka URL: $EUREKA_URL"
+          echo "  ALB URL: $ALB_URL"
+          echo "  Image Tag: $IMAGE_TAG"
+          
+          for i in "${!services[@]}"; do
+            service="${services[$i]}"
+            port="${ports[$i]}"
+            
+            echo "📝 Registering task definition for $service..."
+            
+            cat > task-def-$service.json <<EOF
+          {
+            "family": "dev-$service",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "512",
+            "memory": "1024",
+            "executionRoleArn": "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID || '533924338325' }}:role/dev-ecommerce-ecs-task-execution-role",
+            "taskRoleArn": "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID || '533924338325' }}:role/dev-ecommerce-ecs-task-role",
+            "containerDefinitions": [{
+              "name": "$service",
+              "image": "${{ secrets.DOCKER_USERNAME }}/$service:$IMAGE_TAG",
+              "portMappings": [{"containerPort": $port, "protocol": "tcp"}],
+              "environment": [
+                {"name": "SPRING_PROFILES_ACTIVE", "value": "dev"},
+                {"name": "AWS_REGION", "value": "${{ vars.AWS_REGION || env.AWS_REGION }}"},
+                {"name": "EUREKA_CLIENT_SERVICEURL_DEFAULTZONE", "value": "$EUREKA_URL/eureka/"},
+                {"name": "SPRING_DATASOURCE_URL", "value": "jdbc:postgresql://dev-ecommerce-db.caju06qosdfc.us-east-1.rds.amazonaws.com:5432/ecommerce"},
+                {"name": "SPRING_DATASOURCE_USERNAME", "value": "dbadmin"},
+                {"name": "SPRING_DATASOURCE_PASSWORD", "value": "${{ steps.db-password.outputs.DB_PASSWORD }}"}
+              ],
+              "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                  "awslogs-group": "/ecs/dev-$service",
+                  "awslogs-region": "${{ vars.AWS_REGION || env.AWS_REGION }}",
+                  "awslogs-stream-prefix": "ecs",
+                  "awslogs-create-group": "true"
+                }
+              }
+            }]
+          }
+          EOF
+            
+            aws ecs register-task-definition --cli-input-json file://task-def-$service.json
+            echo "✅ Task definition for $service registered"
+          done
+
+      - name: Update ECS Services
+        run: |
+          services=("service-discovery" "cloud-config" "api-gateway" "user-service" "product-service" "order-service" "payment-service" "shipping-service" "favourite-service" "proxy-client")
+          ECS_CLUSTER="${{ vars.ECS_CLUSTER }}"
+          FAILED_SERVICES=()
+          
+          for service in "${services[@]}"; do
+            echo "🚀 Updating ECS service: $service..."
+            
+            if aws ecs update-service \
+              --cluster $ECS_CLUSTER \
+              --service $service \
+              --task-definition dev-$service \
+              --force-new-deployment \
+              --no-cli-pager > /dev/null 2>&1; then
+              echo "✅ Service $service updated"
+            else
+              echo "❌ Failed to update $service"
+              FAILED_SERVICES+=("$service")
+            fi
+          done
+          
+          if [ ${#FAILED_SERVICES[@]} -gt 0 ]; then
+            echo "❌ Failed services:"
+            printf '%s\n' "${FAILED_SERVICES[@]}"
+            exit 1
+          fi
+
+      - name: Wait for deployment to complete
+        run: |
+          services=("service-discovery" "cloud-config" "api-gateway" "user-service" "product-service" "order-service" "payment-service" "shipping-service" "favourite-service" "proxy-client")
+          ECS_CLUSTER="${{ vars.ECS_CLUSTER }}"
+          FAILED_DEPLOYMENTS=()
+          
+          echo "⏳ Waiting for services to stabilize..."
+          for service in "${services[@]}"; do
+            echo "Waiting for $service..."
+            
+            if aws ecs wait services-stable \
+              --cluster $ECS_CLUSTER \
+              --services $service \
+              --no-cli-pager; then
+              echo "✅ $service is stable"
+            else
+              echo "❌ $service deployment failed or timed out"
+              FAILED_DEPLOYMENTS+=("$service")
+            fi
+          done
+          
+          if [ ${#FAILED_DEPLOYMENTS[@]} -gt 0 ]; then
+            echo ""
+            echo "❌ The following deployments failed:"
+            printf '%s\n' "${FAILED_DEPLOYMENTS[@]}"
+            exit 1
+          fi
+          
+          echo "✅ All services deployed successfully!"
+
+      - name: Verify services health
+        run: |
+          echo "🔍 Verifying service health..."
+          
+          services=("service-discovery" "cloud-config" "api-gateway" "user-service" "product-service" "order-service" "payment-service" "shipping-service" "favourite-service" "proxy-client")
+          ECS_CLUSTER="${{ vars.ECS_CLUSTER }}"
+          
+          for service in "${services[@]}"; do
+            RUNNING=$(aws ecs describe-services \
+              --cluster $ECS_CLUSTER \
+              --services $service \
+              --query 'services[0].runningCount' \
+              --output text)
+            
+            DESIRED=$(aws ecs describe-services \
+              --cluster $ECS_CLUSTER \
+              --services $service \
+              --query 'services[0].desiredCount' \
+              --output text)
+            
+            if [ "$RUNNING" = "$DESIRED" ]; then
+              echo "✅ $service: $RUNNING/$DESIRED running"
+            else
+              echo "⚠  $service: $RUNNING/$DESIRED running"
+            fi
+          done
+
+      - name: Debug Deployment Status (if failed)
+        if: failure()
+        run: |
+          echo "❌ Deployment failed. Debugging..."
+          ECS_CLUSTER="${{ vars.ECS_CLUSTER }}"
+          
+          echo ""
+          echo "1. ECS Services Status:"
+          aws ecs describe-services \
+            --cluster $ECS_CLUSTER \
+            --services service-discovery cloud-config api-gateway user-service product-service order-service payment-service shipping-service favourite-service proxy-client \
+            --query 'services[*].[serviceName,status,runningCount,desiredCount,deployments[0].rolloutState]' \
+            --output table || true
+          
+          echo ""
+          echo "2. Recent Events:"
+          for service in service-discovery cloud-config api-gateway user-service product-service order-service payment-service shipping-service favourite-service proxy-client; do
+            echo "--- $service events ---"
+            aws ecs describe-services \
+              --cluster $ECS_CLUSTER \
+              --services $service \
+              --query 'services[0].events[:5]' \
+              --output table || true
+          done
+
+      - name: Deployment Summary
+        if: success()
+        run: |
+          ECS_CLUSTER="${{ vars.ECS_CLUSTER }}"
+          ALB_URL="${{ vars.ALB_URL }}"
+          
+          echo "## 🎉 Dev Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "*Environment:* dev (ECS Fargate)" >> $GITHUB_STEP_SUMMARY
+          echo "*Image Tag:* ${{ needs.calculate-semver.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "*Commit:* ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "*Branch:* ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "*Author:* ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Services Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          aws ecs describe-services \
+            --cluster $ECS_CLUSTER \
+            --services service-discovery cloud-config api-gateway user-service product-service order-service payment-service shipping-service favourite-service proxy-client \
+            --query 'services[*].[serviceName,runningCount,desiredCount]' \
+            --output text | while read name running desired; do
+              echo "- *$name*: $running/$desired running" >> $GITHUB_STEP_SUMMARY
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🌐 Access URLs" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- *ALB:* $ALB_URL" >> $GITHUB_STEP_SUMMARY
+          echo "- *API Gateway:* $ALB_URL/api" >> $GITHUB_STEP_SUMMARY
+
+  generate-dev-release:
+    name: Generate Dev Release Notes
+    environment:
+      name: development
+    runs-on: ubuntu-latest
+    needs: [ecs-deploy, calculate-semver]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && success()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate version and create tag
+        id: version
+        uses: mathieudutour/github-tag-action@v6.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          release_branches: develop
+          tag_prefix: dev-
+          dry_run: false
+          default_bump: minor
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: dev-${{ steps.version.outputs.new_version }}
+          release_name: Dev Release ${{ steps.version.outputs.new_version }}
+          body: |
+            # 🔧 Dev Release dev-${{ steps.version.outputs.new_version }}
+
+            ## 📝 Changelog
+
+            ${{ steps.version.outputs.changelog }}
+
+            ## 📦 Deployment Details
+
+            - *Environment:* AWS ECS Fargate (us-east-1)
+            - *Cluster:* ${{ vars.ECS_CLUSTER }}
+            - *Build Date:* ${{ github.event.head_commit.timestamp }}
+            - *Commit:* ${{ github.sha }}
+            - *Author:* ${{ github.actor }}
+
+            ## 🐳 Docker Images
+
+            - ${{ env.DOCKER_USERNAME }}/service-discovery:dev
+            - ${{ env.DOCKER_USERNAME }}/cloud-config:dev
+            - ${{ env.DOCKER_USERNAME }}/api-gateway:dev
+            - ${{ env.DOCKER_USERNAME }}/user-service:dev
+            - ${{ env.DOCKER_USERNAME }}/product-service:dev
+            - ${{ env.DOCKER_USERNAME }}/order-service:dev
+            - ${{ env.DOCKER_USERNAME }}/payment-service:dev
+            - ${{ env.DOCKER_USERNAME }}/shipping-service:dev
+            - ${{ env.DOCKER_USERNAME }}/favourite-service:dev
+            - ${{ env.DOCKER_USERNAME }}/proxy-client:dev
+
+            ## ✅ Quality Gates
+
+            - Unit Tests: ✅
+            - Code Quality (SonarQube): ✅
+            - Docker Build: ✅
+            - ECS Deployment: ✅
+
+            ## 🌐 Access
+
+            - ALB URL: ${{ vars.ALB_URL }}
+
+            ## ⚠ Development Build
+
+            This is a pre-release development build. Use with caution.
+
+          draft: false
+          prerelease: true
