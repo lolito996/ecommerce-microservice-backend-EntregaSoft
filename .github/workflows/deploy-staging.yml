@@ -1,0 +1,180 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches:
+      - stage
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: docker.io
+  DOCKER_USERNAME: alejomunoz
+
+jobs:
+  deploy-staging:
+    name: Deploy to Staging Environment
+    runs-on: ubuntu-latest
+    environment: staging
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build and Push Docker Images
+        run: |
+          services=("service-discovery" "cloud-config" "api-gateway" "user-service" "product-service" "order-service")
+          
+          for service in "${services[@]}"; do
+            echo "🔨 Building $service..."
+            cd $service
+            
+            # Build with Maven
+            ./mvnw clean package -DskipTests
+            
+            # Build Docker image
+            docker build -t ${{ secrets.DOCKER_USERNAME }}/$service:latest .
+            docker build -t ${{ secrets.DOCKER_USERNAME }}/$service:${{ github.sha }} .
+            
+            # Push to Docker Hub
+            docker push ${{ secrets.DOCKER_USERNAME }}/$service:latest
+            docker push ${{ secrets.DOCKER_USERNAME }}/$service:${{ github.sha }}
+            
+            echo "✅ $service pushed successfully"
+            cd ..
+          done
+
+      - name: Get DB Password from Secrets Manager
+        id: db-password
+        run: |
+          DB_PASSWORD=$(aws secretsmanager get-secret-value \
+            --secret-id stage-ecommerce-db-master-password \
+            --query SecretString \
+            --output text)
+          echo "::add-mask::$DB_PASSWORD"
+          echo "DB_PASSWORD=$DB_PASSWORD" >> $GITHUB_OUTPUT
+
+      - name: Register ECS Task Definitions
+        run: |
+          services=("service-discovery" "cloud-config" "api-gateway" "user-service" "product-service" "order-service")
+          ports=(8761 8888 8080 8081 8082 8083)
+          
+          for i in "${!services[@]}"; do
+            service="${services[$i]}"
+            port="${ports[$i]}"
+            
+            echo "📝 Registering task definition for $service..."
+            
+            cat > task-def-$service.json <<EOF
+          {
+            "family": "stage-$service",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "512",
+            "memory": "1024",
+            "executionRoleArn": "arn:aws:iam::533924338325:role/stage-ecommerce-ecs-task-execution-role",
+            "taskRoleArn": "arn:aws:iam::533924338325:role/stage-ecommerce-ecs-task-role",
+            "containerDefinitions": [{
+              "name": "$service",
+              "image": "${{ secrets.DOCKER_USERNAME }}/$service:${{ github.sha }}",
+              "portMappings": [{"containerPort": $port, "protocol": "tcp"}],
+              "environment": [
+                {"name": "SPRING_PROFILES_ACTIVE", "value": "stage"},
+                {"name": "AWS_REGION", "value": "${{ env.AWS_REGION }}"},
+                {"name": "EUREKA_CLIENT_SERVICEURL_DEFAULTZONE", "value": "http://stage-ecommerce-alb-326144584.us-east-1.elb.amazonaws.com:8761/eureka/"},
+                {"name": "SPRING_DATASOURCE_URL", "value": "jdbc:postgresql://stage-ecommerce-db.caju06qosdfc.us-east-1.rds.amazonaws.com:5432/ecommerce"},
+                {"name": "SPRING_DATASOURCE_USERNAME", "value": "dbadmin"},
+                {"name": "SPRING_DATASOURCE_PASSWORD", "value": "${{ steps.db-password.outputs.DB_PASSWORD }}"}
+              ],
+              "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                  "awslogs-group": "/ecs/stage-$service",
+                  "awslogs-region": "${{ env.AWS_REGION }}",
+                  "awslogs-stream-prefix": "ecs",
+                  "awslogs-create-group": "true"
+                }
+              }
+            }]
+          }
+          EOF
+            
+            aws ecs register-task-definition --cli-input-json file://task-def-$service.json
+            echo "✅ Task definition for $service registered"
+          done
+
+      - name: Update ECS Services
+        run: |
+          services=("service-discovery" "cloud-config" "api-gateway" "user-service" "product-service" "order-service")
+          
+          for service in "${services[@]}"; do
+            echo "🚀 Updating ECS service: $service..."
+            
+            aws ecs update-service \
+              --cluster stage-ecommerce-cluster \
+              --service $service \
+              --task-definition stage-$service \
+              --force-new-deployment
+            
+            echo "✅ Service $service updated"
+          done
+
+      - name: Wait for deployment to complete
+        run: |
+          services=("service-discovery" "cloud-config" "api-gateway" "user-service" "product-service" "order-service")
+          
+          echo "⏳ Waiting for services to stabilize..."
+          for service in "${services[@]}"; do
+            echo "Waiting for $service..."
+            aws ecs wait services-stable \
+              --cluster stage-ecommerce-cluster \
+              --services $service \
+              --no-cli-pager || true
+          done
+          
+          echo "✅ All services deployed successfully!"
+
+      - name: Deployment Summary
+        run: |
+          echo "## 🎉 Staging Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** staging" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Services Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          aws ecs describe-services \
+            --cluster stage-ecommerce-cluster \
+            --services service-discovery cloud-config api-gateway user-service product-service order-service \
+            --query 'services[*].[serviceName,runningCount,desiredCount]' \
+            --output text | while read name running desired; do
+              echo "- **$name**: $running/$desired running" >> $GITHUB_STEP_SUMMARY
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🌐 Access URLs" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Eureka:** http://stage-ecommerce-alb-326144584.us-east-1.elb.amazonaws.com:8761" >> $GITHUB_STEP_SUMMARY
+          echo "- **API Gateway:** http://stage-ecommerce-alb-326144584.us-east-1.elb.amazonaws.com:8080/api" >> $GITHUB_STEP_SUMMARY
