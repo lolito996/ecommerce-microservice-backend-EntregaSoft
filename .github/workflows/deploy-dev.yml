@@ -92,6 +92,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
         service:
           - api-gateway
@@ -106,6 +107,13 @@ jobs:
           - user-service
 
     steps:
+      - name: Wait to avoid rate limit
+        run: |
+          # Add a small delay between builds to avoid Docker Hub rate limit
+          DELAY=$((RANDOM % 30 + 10))
+          echo "Waiting $DELAY seconds to avoid rate limit..."
+          sleep $DELAY
+
       - name: Download workspace
         uses: actions/download-artifact@v4
         with:
@@ -153,8 +161,12 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha,scope=${{ matrix.service }}
+            type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ matrix.service }}:latest
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
 
       - name: Run Trivy vulnerability scanner
         if: steps.check.outputs.exists == 'true'
