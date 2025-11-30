@@ -89,7 +89,9 @@ jobs:
     name: Build and Push ${{ matrix.service }}
     runs-on: ubuntu-latest
     needs: [maven-build, calculate-semver]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    # TEMPORARILY DISABLED: Docker Hub rate limit reached
+    # Re-enable when rate limit resets (after 6 hours) or when using GHCR
+    if: false
     strategy:
       fail-fast: false
       max-parallel: 3
