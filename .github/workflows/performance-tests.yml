@@ -111,6 +111,10 @@ jobs:
         # Apply ConfigMap
         sed -e "s|\${NAMESPACE}|${NAMESPACE}|g" k8s/base/configmap.yaml | kubectl apply -f -
         
+        # Note: Services are configured to use H2 in-memory database (dev profile)
+        # This means they don't need external MySQL databases and should start successfully
+        # The ConfigMap sets SPRING_PROFILES_ACTIVE=dev which uses H2 from application-dev.yml
+        
         # Deploy services in order
         # Zipkin
         sed -e "s|\${REGISTRY}|${REGISTRY}|g" \
@@ -119,31 +123,52 @@ jobs:
             -e "s|\${NODE_PORT}|30087|g" \
             k8s/base/zipkin.yaml | kubectl apply -f -
         
-        # Service Discovery
+        # Service Discovery (must be first)
+        echo "Deploying Service Discovery..."
         sed -e "s|\${REGISTRY}|${REGISTRY}|g" \
             -e "s|\${NAMESPACE}|${NAMESPACE}|g" \
             -e "s|\${IMAGE_TAG}|${IMAGE_TAG}|g" \
             -e "s|\${NODE_PORT}|30187|g" \
             k8s/base/service-discovery.yaml | kubectl apply -f -
+        echo "Waiting for Service Discovery to be ready..."
         kubectl wait --for=condition=ready pod -l app=service-discovery -n ${NAMESPACE} --timeout=300s || true
+        sleep 20  # Give Eureka time to fully start
         
-        # API Gateway
+        # Cloud Config (if exists, deploy before other services)
+        if [ -f "k8s/base/cloud-config.yaml" ]; then
+          echo "Deploying Cloud Config..."
+          sed -e "s|\${REGISTRY}|${REGISTRY}|g" \
+              -e "s|\${NAMESPACE}|${NAMESPACE}|g" \
+              -e "s|\${IMAGE_TAG}|${IMAGE_TAG}|g" \
+              k8s/base/cloud-config.yaml | kubectl apply -f - || true
+          sleep 10
+        fi
+        
+        # Business Services (deploy before API Gateway so they can register)
+        echo "Deploying Business Services..."
+        for service in user-service product-service order-service shipping-service proxy-client; do
+          if [ -f "k8s/base/${service}.yaml" ]; then
+            echo "  Deploying ${service}..."
+            sed -e "s|\${REGISTRY}|${REGISTRY}|g" \
+                -e "s|\${NAMESPACE}|${NAMESPACE}|g" \
+                -e "s|\${IMAGE_TAG}|${IMAGE_TAG}|g" \
+                k8s/base/${service}.yaml | kubectl apply -f -
+          fi
+        done
+        
+        # Wait a bit for services to start registering
+        sleep 30
+        
+        # API Gateway (deploy after services so it can discover them)
+        echo "Deploying API Gateway..."
         sed -e "s|\${REGISTRY}|${REGISTRY}|g" \
             -e "s|\${NAMESPACE}|${NAMESPACE}|g" \
             -e "s|\${IMAGE_TAG}|${IMAGE_TAG}|g" \
             -e "s|\${NODE_PORT}|30180|g" \
             k8s/base/api-gateway.yaml | kubectl apply -f -
-        kubectl wait --for=condition=ready pod -l app=api-gateway -n ${NAMESPACE} --timeout=300s || true
-        
-        # Other services
-        for service in user-service product-service order-service shipping-service proxy-client; do
-          sed -e "s|\${REGISTRY}|${REGISTRY}|g" \
-              -e "s|\${NAMESPACE}|${NAMESPACE}|g" \
-              -e "s|\${IMAGE_TAG}|${IMAGE_TAG}|g" \
-              k8s/base/${service}.yaml | kubectl apply -f -
-        done
         
         # Wait for all services
+        echo "Waiting for all pods to be ready..."
         kubectl wait --for=condition=ready pod --all -n ${NAMESPACE} --timeout=600s || true
         kubectl get pods -n ${NAMESPACE}
     
@@ -151,13 +176,78 @@ jobs:
       run: |
         export NAMESPACE="microservices-staging"
         echo "Waiting for services to be ready..."
-        sleep 60
+        
+        # Wait for all pods to be ready
+        kubectl wait --for=condition=ready pod --all -n ${NAMESPACE} --timeout=600s || true
         kubectl get pods -n ${NAMESPACE}
         kubectl get svc -n ${NAMESPACE}
         
-        # Wait for all pods to be ready
-        kubectl wait --for=condition=ready pod --all -n ${NAMESPACE} --timeout=300s || true
-        echo "All pods are ready"
+        echo "All pods are ready, waiting for services to register in Eureka..."
+        
+        # Wait for Eureka to be fully ready
+        echo "Waiting for Eureka Service Discovery to be ready..."
+        kubectl wait --for=condition=ready pod -l app=service-discovery -n ${NAMESPACE} --timeout=300s || true
+        sleep 30
+        
+        # Port forward Eureka to check service registration
+        kubectl port-forward -n ${NAMESPACE} svc/service-discovery 8761:8761 > /tmp/eureka-pf.log 2>&1 &
+        EUREKA_PF_PID=$!
+        echo $EUREKA_PF_PID > /tmp/eureka-pf.pid
+        sleep 10
+        
+        # Wait for services to register in Eureka (with retries)
+        echo "Checking service registration in Eureka..."
+        MAX_RETRIES=30
+        RETRY_COUNT=0
+        SERVICES_REGISTERED=false
+        
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+          # Check if services are registered in Eureka
+          EUREKA_RESPONSE=$(curl -s http://localhost:8761/eureka/apps 2>/dev/null || echo "")
+          
+          if [ -n "$EUREKA_RESPONSE" ] && echo "$EUREKA_RESPONSE" | grep -q "USER-SERVICE\|PRODUCT-SERVICE\|ORDER-SERVICE\|SHIPPING-SERVICE\|API-GATEWAY"; then
+            echo "✓ Services are registering in Eureka..."
+            REGISTERED_COUNT=$(echo "$EUREKA_RESPONSE" | grep -o "<name>[A-Z-]*</name>" | sort -u | wc -l)
+            REGISTERED_SERVICES=$(echo "$EUREKA_RESPONSE" | grep -o "<name>[A-Z-]*</name>" | sed 's/<name>//g' | sed 's/<\/name>//g' | sort -u)
+            echo "Registered services: $REGISTERED_SERVICES"
+            echo "Registered services count: $REGISTERED_COUNT"
+            
+            # Check if we have at least 3 services registered (API-GATEWAY + at least 2 business services)
+            # Note: Services may show as DOWN in Eureka if health checks fail (e.g., no DB), but they're still registered
+            if [ "$REGISTERED_COUNT" -ge 3 ]; then
+              SERVICES_REGISTERED=true
+              echo "✓ Required services are registered in Eureka (some may be DOWN due to missing DB, but routing should work)"
+              break
+            fi
+          else
+            echo "Eureka response empty or no services found yet"
+          fi
+          
+          RETRY_COUNT=$((RETRY_COUNT + 1))
+          echo "Waiting for services to register... ($RETRY_COUNT/$MAX_RETRIES)"
+          sleep 10
+        done
+        
+        # Stop Eureka port-forward
+        if [ -f /tmp/eureka-pf.pid ]; then
+          kill $(cat /tmp/eureka-pf.pid) 2>/dev/null || true
+          pkill -f "kubectl port-forward.*service-discovery" || true
+        fi
+        
+        if [ "$SERVICES_REGISTERED" = false ]; then
+          echo "⚠ Warning: Not all services registered in Eureka, but continuing with tests..."
+          echo "Eureka response:"
+          curl -s http://localhost:8761/eureka/apps 2>/dev/null | head -100 || echo "Could not fetch Eureka response"
+          echo ""
+          echo "Note: Services may show as DOWN in Eureka if databases are not available,"
+          echo "      but they should still be registered and routable by API Gateway."
+        else
+          echo "✓ Services registered in Eureka (some may be DOWN due to missing DB, but routing should work)"
+        fi
+        
+        # Additional wait for API Gateway to discover services
+        echo "Waiting for API Gateway to discover services..."
+        sleep 30
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -168,13 +258,117 @@ jobs:
       run: |
         pip install locust
 
-    - name: Port forward API Gateway
+    - name: Port forward API Gateway and verify services
       run: |
-        kubectl port-forward -n microservices-staging svc/api-gateway 30080:8080 > /tmp/port-forward.log 2>&1 &
+        export NAMESPACE="microservices-staging"
+        kubectl port-forward -n ${NAMESPACE} svc/api-gateway 30080:8080 > /tmp/port-forward.log 2>&1 &
         echo $! > /tmp/kubectl-pf.pid
-        sleep 10
-        # Test connection
-        curl -s -o /dev/null -w "%{http_code}" "http://localhost:30080/actuator/health" || echo "000"
+        sleep 15
+        
+        # Test API Gateway health
+        echo "Testing API Gateway health..."
+        MAX_HEALTH_RETRIES=10
+        HEALTH_RETRY=0
+        while [ $HEALTH_RETRY -lt $MAX_HEALTH_RETRIES ]; do
+          HEALTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:30080/actuator/health" || echo "000")
+          if [ "$HEALTH_CODE" = "200" ]; then
+            echo "✓ API Gateway is healthy (HTTP $HEALTH_CODE)"
+            break
+          fi
+          HEALTH_RETRY=$((HEALTH_RETRY + 1))
+          echo "Waiting for API Gateway health... ($HEALTH_RETRY/$MAX_HEALTH_RETRIES) - HTTP $HEALTH_CODE"
+          sleep 5
+        done
+        
+        # Test if API Gateway can route to services
+        echo "Testing API Gateway routing to services..."
+        sleep 5
+        
+        # Test endpoints to verify routing works
+        # Note: Services may return 500 if DB is not available, but 503 means service not found in Eureka
+        # 404 means route not found (wrong path), 405 means method not allowed (wrong HTTP method)
+        echo "Testing API Gateway routing to services..."
+        TEST_ENDPOINTS=(
+          "GET:/user-service/api/users"
+          "GET:/product-service/api/products"
+          "GET:/order-service/api/orders"
+          "GET:/shipping-service/api/shippings"
+        )
+        
+        ROUTING_WORKS=false
+        WORKING_ENDPOINTS=0
+        TOTAL_ENDPOINTS=${#TEST_ENDPOINTS[@]}
+        
+        for endpoint_spec in "${TEST_ENDPOINTS[@]}"; do
+          METHOD=$(echo "$endpoint_spec" | cut -d':' -f1)
+          ENDPOINT=$(echo "$endpoint_spec" | cut -d':' -f2)
+          echo "Testing $METHOD $ENDPOINT"
+          
+          if [ "$METHOD" = "GET" ]; then
+            RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X GET "http://localhost:30080${ENDPOINT}" --max-time 5 || echo "000")
+          else
+            RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X "$METHOD" "http://localhost:30080${ENDPOINT}" --max-time 5 || echo "000")
+          fi
+          
+          echo "  Response: HTTP $RESPONSE_CODE"
+          
+          # Accept 200 (OK), 404 (Not Found - endpoint may not exist but routing works), 405 (Method Not Allowed - routing works), 500 (Internal Error - DB issue but service is registered)
+          # Reject 503 (Service Unavailable - service not registered in Eureka or API Gateway can't resolve it)
+          if [ "$RESPONSE_CODE" = "503" ]; then
+            echo "  ❌ Service unavailable (503) - service not registered in Eureka or API Gateway can't resolve it"
+          elif [ "$RESPONSE_CODE" = "404" ]; then
+            echo "  ⚠ Route exists but endpoint may not exist (404) - routing works, endpoint may need data"
+            ROUTING_WORKS=true
+            WORKING_ENDPOINTS=$((WORKING_ENDPOINTS + 1))
+          elif [ "$RESPONSE_CODE" = "405" ]; then
+            echo "  ⚠ Method not allowed (405) - routing works but wrong HTTP method"
+            ROUTING_WORKS=true
+            WORKING_ENDPOINTS=$((WORKING_ENDPOINTS + 1))
+          elif [ "$RESPONSE_CODE" = "200" ]; then
+            echo "  ✓ Endpoint working correctly (200)"
+            ROUTING_WORKS=true
+            WORKING_ENDPOINTS=$((WORKING_ENDPOINTS + 1))
+          elif [ "$RESPONSE_CODE" = "500" ]; then
+            echo "  ⚠ Internal server error (500) - service is registered but may have DB issues (expected with H2)"
+            ROUTING_WORKS=true
+            WORKING_ENDPOINTS=$((WORKING_ENDPOINTS + 1))
+          elif [ "$RESPONSE_CODE" = "000" ]; then
+            echo "  ❌ Connection failed - API Gateway may not be ready or port-forward issue"
+          else
+            echo "  ⚠ Unexpected response code: $RESPONSE_CODE"
+          fi
+        done
+        
+        echo ""
+        echo "Routing test summary: $WORKING_ENDPOINTS/$TOTAL_ENDPOINTS endpoints are routable"
+        
+        if [ "$ROUTING_WORKS" = false ] || [ "$WORKING_ENDPOINTS" -eq 0 ]; then
+          echo "❌ ERROR: No endpoints are routing correctly. Services may not be registered in Eureka."
+          echo "Checking service status..."
+          kubectl get pods -n ${NAMESPACE} -o wide
+          echo ""
+          echo "Checking pod logs for errors..."
+          for pod in $(kubectl get pods -n ${NAMESPACE} -o name | grep -E "(user-service|product-service|order-service|shipping-service|api-gateway)"); do
+            echo "=== Logs for $pod ==="
+            kubectl logs -n ${NAMESPACE} $pod --tail=20 || true
+          done
+          echo ""
+          echo "Checking Eureka registration..."
+          kubectl port-forward -n ${NAMESPACE} svc/service-discovery 8761:8761 > /tmp/eureka-check.log 2>&1 &
+          sleep 5
+          echo "Registered services in Eureka:"
+          curl -s http://localhost:8761/eureka/apps 2>/dev/null | grep -o "<name>[A-Z-]*</name>" | head -10 || echo "Could not fetch Eureka apps"
+          pkill -f "kubectl port-forward.*service-discovery" || true
+          echo ""
+          echo "⚠ Continuing with tests, but expect 100% failure rate (503 errors)"
+        elif [ "$WORKING_ENDPOINTS" -lt 2 ]; then
+          echo "⚠ Warning: Only $WORKING_ENDPOINTS endpoints are routable. Some services may not be ready."
+          echo "Tests may have some failures, but should work for routable endpoints."
+        else
+          echo "✓ $WORKING_ENDPOINTS/$TOTAL_ENDPOINTS endpoints are routable - tests should work correctly"
+        fi
+        
+        echo "API Gateway port-forward ready"
       continue-on-error: true
 
     - name: Run Performance Tests
@@ -228,6 +422,9 @@ jobs:
       run: |
         if [ -f /tmp/kubectl-pf.pid ]; then
           kill $(cat /tmp/kubectl-pf.pid) 2>/dev/null || true
+        fi
+        if [ -f /tmp/eureka-pf.pid ]; then
+          kill $(cat /tmp/eureka-pf.pid) 2>/dev/null || true
         fi
         pkill -f "kubectl port-forward" || true
 

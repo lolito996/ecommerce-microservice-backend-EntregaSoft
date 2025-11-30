@@ -6,6 +6,15 @@ metadata:
 data:
   SPRING_PROFILES_ACTIVE: "dev"
   JAVA_OPTS: "-Xms256m -Xmx512m"
+  
+  # Database Configuration (H2 in-memory for dev profile - no external DB needed)
+  # When SPRING_PROFILES_ACTIVE=dev, services use H2 in-memory database
+  # This allows services to start without external MySQL databases
+  SPRING_DATASOURCE_URL: "jdbc:h2:mem:ecommerce_dev_db;DB_CLOSE_ON_EXIT=FALSE"
+  SPRING_DATASOURCE_USERNAME: "sa"
+  SPRING_DATASOURCE_PASSWORD: ""
+  SPRING_JPA_HIBERNATE_DDL_AUTO: "update"
+  SPRING_JPA_SHOW_SQL: "false"
 
   # Service Discovery
   EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE: "http://service-discovery.${NAMESPACE}.svc.cluster.local:8761/eureka/"
