@@ -202,16 +202,18 @@ jobs:
           services=("service-discovery" "cloud-config" "api-gateway" "user-service" "product-service" "order-service" "payment-service" "shipping-service" "favourite-service" "proxy-client")
           ports=(8761 8888 8080 8081 8082 8083 8084 8085 8086 8087)
           
-          ECS_CLUSTER="${{ vars.ECS_CLUSTER }}"
+          ECS_CLUSTER="${{ vars.ECS_CLUSTER || 'dev-ecommerce-cluster' }}"
           EUREKA_URL="${{ vars.EUREKA_URL }}"
           ALB_URL="${{ vars.ALB_URL }}"
-          IMAGE_TAG="${{ needs.calculate-semver.outputs.new_version }}"
+          
+          # Always use 'dev' tag which is updated with latest images
+          IMAGE_TAG="dev"
           
           echo "🔧 Using configuration:"
           echo "  ECS Cluster: $ECS_CLUSTER"
           echo "  Eureka URL: $EUREKA_URL"
           echo "  ALB URL: $ALB_URL"
-          echo "  Image Tag: $IMAGE_TAG"
+          echo "  Image Tag: $IMAGE_TAG (always uses latest dev images)"
           
           for i in "${!services[@]}"; do
             service="${services[$i]}"
