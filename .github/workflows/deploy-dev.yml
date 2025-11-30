@@ -264,18 +264,20 @@ jobs:
           FAILED_SERVICES=()
           
           for service in "${services[@]}"; do
-            echo "🚀 Updating ECS service: $service..."
+            echo "🚀 Updating ECS service: dev-$service..."
             
+            # Scale up to 1 if service is at 0, then update with new task definition
             if aws ecs update-service \
               --cluster $ECS_CLUSTER \
-              --service $service \
+              --service dev-$service \
+              --desired-count 1 \
               --task-definition dev-$service \
               --force-new-deployment \
               --no-cli-pager > /dev/null 2>&1; then
-              echo "✅ Service $service updated"
+              echo "✅ Service dev-$service updated and scaled to 1"
             else
-              echo "❌ Failed to update $service"
-              FAILED_SERVICES+=("$service")
+              echo "❌ Failed to update dev-$service"
+              FAILED_SERVICES+=("dev-$service")
             fi
           done
           
@@ -293,16 +295,16 @@ jobs:
           
           echo "⏳ Waiting for services to stabilize..."
           for service in "${services[@]}"; do
-            echo "Waiting for $service..."
+            echo "Waiting for dev-$service..."
             
             if aws ecs wait services-stable \
               --cluster $ECS_CLUSTER \
-              --services $service \
+              --services dev-$service \
               --no-cli-pager; then
-              echo "✅ $service is stable"
+              echo "✅ dev-$service is stable"
             else
-              echo "❌ $service deployment failed or timed out"
-              FAILED_DEPLOYMENTS+=("$service")
+              echo "❌ dev-$service deployment failed or timed out"
+              FAILED_DEPLOYMENTS+=("dev-$service")
             fi
           done
           
@@ -325,20 +327,20 @@ jobs:
           for service in "${services[@]}"; do
             RUNNING=$(aws ecs describe-services \
               --cluster $ECS_CLUSTER \
-              --services $service \
+              --services dev-$service \
               --query 'services[0].runningCount' \
               --output text)
             
             DESIRED=$(aws ecs describe-services \
               --cluster $ECS_CLUSTER \
-              --services $service \
+              --services dev-$service \
               --query 'services[0].desiredCount' \
               --output text)
             
             if [ "$RUNNING" = "$DESIRED" ]; then
-              echo "✅ $service: $RUNNING/$DESIRED running"
+              echo "✅ dev-$service: $RUNNING/$DESIRED running"
             else
-              echo "⚠  $service: $RUNNING/$DESIRED running"
+              echo "⚠  dev-$service: $RUNNING/$DESIRED running"
             fi
           done
 
@@ -352,17 +354,17 @@ jobs:
           echo "1. ECS Services Status:"
           aws ecs describe-services \
             --cluster $ECS_CLUSTER \
-            --services service-discovery cloud-config api-gateway user-service product-service order-service payment-service shipping-service favourite-service proxy-client \
+            --services dev-service-discovery dev-cloud-config dev-api-gateway dev-user-service dev-product-service dev-order-service dev-payment-service dev-shipping-service dev-favourite-service dev-proxy-client \
             --query 'services[*].[serviceName,status,runningCount,desiredCount,deployments[0].rolloutState]' \
             --output table || true
           
           echo ""
           echo "2. Recent Events:"
           for service in service-discovery cloud-config api-gateway user-service product-service order-service payment-service shipping-service favourite-service proxy-client; do
-            echo "--- $service events ---"
+            echo "--- dev-$service events ---"
             aws ecs describe-services \
               --cluster $ECS_CLUSTER \
-              --services $service \
+              --services dev-$service \
               --query 'services[0].events[:5]' \
               --output table || true
           done
@@ -386,7 +388,7 @@ jobs:
           
           aws ecs describe-services \
             --cluster $ECS_CLUSTER \
-            --services service-discovery cloud-config api-gateway user-service product-service order-service payment-service shipping-service favourite-service proxy-client \
+            --services dev-service-discovery dev-cloud-config dev-api-gateway dev-user-service dev-product-service dev-order-service dev-payment-service dev-shipping-service dev-favourite-service dev-proxy-client \
             --query 'services[*].[serviceName,runningCount,desiredCount]' \
             --output text | while read name running desired; do
               echo "- *$name*: $running/$desired running" >> $GITHUB_STEP_SUMMARY
