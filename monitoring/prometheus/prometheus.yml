@@ -2,7 +2,7 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
-    cluster: 'microservices'
+    cluster: 'microservices-ecs'
     environment: 'dev'
 
 scrape_configs:
@@ -10,54 +10,38 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
-  - job_name: 'api-gateway'
-    metrics_path: '/actuator/prometheus'
-    static_configs:
-      - targets: ['api-gateway-container:8080']
-
-  - job_name: 'user-service'
-    metrics_path: '/user-service/actuator/prometheus'
-    static_configs:
-      - targets: ['user-service-container:8700']
-
-  - job_name: 'product-service'
-    metrics_path: '/product-service/actuator/prometheus'
-    static_configs:
-      - targets: ['product-service-container:8500']
-
-  - job_name: 'order-service'
-    metrics_path: '/order-service/actuator/prometheus'
-    static_configs:
-      - targets: ['order-service-container:8300']
-
-  - job_name: 'shipping-service'
-    metrics_path: '/shipping-service/actuator/prometheus'
-    static_configs:
-      - targets: ['shipping-service-container:8600']
-
-  - job_name: 'payment-service'
-    metrics_path: '/payment-service/actuator/prometheus'
-    static_configs:
-      - targets: ['payment-service-container:8400']
-
-  - job_name: 'favourite-service'
-    metrics_path: '/favourite-service/actuator/prometheus'
-    static_configs:
-      - targets: ['favourite-service-container:8800']
-
-  - job_name: 'service-discovery'
-    metrics_path: '/actuator/prometheus'
-    static_configs:
-      - targets: ['service-discovery-container:8761']
-
   - job_name: 'cloud-config'
     metrics_path: '/actuator/prometheus'
     static_configs:
-      - targets: ['cloud-config-container:9296']
-
+      - targets: ['10.0.20.66:8888']
+        labels:
+          service: 'cloud-config'
+          environment: 'dev'
   - job_name: 'proxy-client'
-    metrics_path: '/app/actuator/prometheus'
+    metrics_path: '/actuator/prometheus'
     static_configs:
-      - targets: ['proxy-client-container:8900']
-
-
+      - targets: ['10.0.20.250:8087']
+        labels:
+          service: 'proxy-client'
+          environment: 'dev'
+  - job_name: 'api-gateway'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['10.0.10.111:8080']
+        labels:
+          service: 'api-gateway'
+          environment: 'dev'
+  - job_name: 'user-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['10.0.20.249:8081']
+        labels:
+          service: 'user-service'
+          environment: 'dev'
+  - job_name: 'service-discovery'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['10.0.10.5:8761']
+        labels:
+          service: 'service-discovery'
+          environment: 'dev'
