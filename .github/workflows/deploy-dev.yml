@@ -267,16 +267,17 @@ jobs:
             echo "🚀 Updating ECS service: dev-$service..."
             
             # Scale up to 1 if service is at 0, then update with new task definition
-            if aws ecs update-service \
+            if OUTPUT=$(aws ecs update-service \
               --cluster $ECS_CLUSTER \
               --service dev-$service \
               --desired-count 1 \
               --task-definition dev-$service \
               --force-new-deployment \
-              --no-cli-pager > /dev/null 2>&1; then
+              --no-cli-pager 2>&1); then
               echo "✅ Service dev-$service updated and scaled to 1"
             else
               echo "❌ Failed to update dev-$service"
+              echo "Error: $OUTPUT"
               FAILED_SERVICES+=("dev-$service")
             fi
           done
