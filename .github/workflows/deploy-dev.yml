@@ -197,6 +197,21 @@ jobs:
           echo "::add-mask::$DB_PASSWORD"
           echo "DB_PASSWORD=$DB_PASSWORD" >> $GITHUB_OUTPUT
 
+      - name: Create CloudWatch Log Groups
+        run: |
+          services=("service-discovery" "cloud-config" "api-gateway" "user-service" "product-service" "order-service" "payment-service" "shipping-service" "favourite-service" "proxy-client")
+          
+          echo "📝 Creating CloudWatch log groups..."
+          for service in "${services[@]}"; do
+            LOG_GROUP="/ecs/dev-$service"
+            if aws logs describe-log-groups --log-group-name-prefix "$LOG_GROUP" --query "logGroups[?logGroupName=='$LOG_GROUP']" --output text | grep -q "$LOG_GROUP"; then
+              echo "✅ Log group $LOG_GROUP already exists"
+            else
+              aws logs create-log-group --log-group-name "$LOG_GROUP" --region ${{ vars.AWS_REGION || env.AWS_REGION }} || echo "⚠️  Could not create $LOG_GROUP"
+              echo "✅ Created log group $LOG_GROUP"
+            fi
+          done
+
       - name: Register ECS Task Definitions
         run: |
           services=("service-discovery" "cloud-config" "api-gateway" "user-service" "product-service" "order-service" "payment-service" "shipping-service" "favourite-service" "proxy-client")
@@ -247,8 +262,7 @@ jobs:
                 "options": {
                   "awslogs-group": "/ecs/dev-$service",
                   "awslogs-region": "${{ vars.AWS_REGION || env.AWS_REGION }}",
-                  "awslogs-stream-prefix": "ecs",
-                  "awslogs-create-group": "true"
+                  "awslogs-stream-prefix": "ecs"
                 }
               }
             }]
