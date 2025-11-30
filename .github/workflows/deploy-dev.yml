@@ -77,13 +77,13 @@ jobs:
 
       - name: Calculate version
         id: calc
-        uses: mathieudutour/github-tag-action@v6.1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          release_branches: develop
-          tag_prefix: dev-
-          dry_run: true
-          default_bump: minor
+        run: |
+          # Use commit SHA as version tag
+          VERSION="${{ github.sha }}"
+          SHORT_SHA="${VERSION:0:7}"
+          echo "new_version=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "changelog=Automated deployment from commit $SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "Using version: $SHORT_SHA"
 
   docker-build:
     name: Build and Push ${{ matrix.service }}
@@ -413,13 +413,21 @@ jobs:
 
       - name: Calculate version and create tag
         id: version
-        uses: mathieudutour/github-tag-action@v6.1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          release_branches: develop
-          tag_prefix: dev-
-          dry_run: false
-          default_bump: minor
+        run: |
+          # Use timestamp-based version for releases
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          SHORT_SHA="${{ github.sha }}"
+          SHORT_SHA="${SHORT_SHA:0:7}"
+          VERSION="$TIMESTAMP-$SHORT_SHA"
+          
+          echo "new_version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "changelog=Automated dev deployment from commit $SHORT_SHA" >> "$GITHUB_OUTPUT"
+          
+          # Create git tag
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "dev-$VERSION" -m "Dev release $VERSION"
+          git push origin "dev-$VERSION" || echo "Tag already exists or push failed"
 
       - name: Create GitHub Release
         uses: actions/create-release@v1
