@@ -206,14 +206,14 @@ jobs:
           EUREKA_URL="${{ vars.EUREKA_URL }}"
           ALB_URL="${{ vars.ALB_URL }}"
           
-          # Always use 'dev' tag which is updated with latest images
-          IMAGE_TAG="dev"
+          # Use 'latest' tag which always exists in Docker Hub
+          IMAGE_TAG="latest"
           
           echo "🔧 Using configuration:"
           echo "  ECS Cluster: $ECS_CLUSTER"
           echo "  Eureka URL: $EUREKA_URL"
           echo "  ALB URL: $ALB_URL"
-          echo "  Image Tag: $IMAGE_TAG (always uses latest dev images)"
+          echo "  Image Tag: $IMAGE_TAG"
           
           for i in "${!services[@]}"; do
             service="${services[$i]}"
