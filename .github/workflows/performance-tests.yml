@@ -109,7 +109,12 @@ jobs:
         export NAMESPACE="microservices-staging"
         
         # Apply ConfigMap
+        echo "Applying ConfigMap with namespace: ${NAMESPACE}"
         sed -e "s|\${NAMESPACE}|${NAMESPACE}|g" k8s/base/configmap.yaml | kubectl apply -f -
+        
+        # Verify ConfigMap was created correctly
+        echo "Verifying ConfigMap contents..."
+        kubectl get configmap micro-config -n ${NAMESPACE} -o yaml | grep -A 5 "EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE" || echo "⚠ ConfigMap verification failed"
         
         # Note: Services are configured to use H2 in-memory database (dev profile)
         # This means they don't need external MySQL databases and should start successfully
@@ -134,6 +139,16 @@ jobs:
         kubectl wait --for=condition=ready pod -l app=service-discovery -n ${NAMESPACE} --timeout=300s || true
         sleep 20  # Give Eureka time to fully start
         
+        # Verify Eureka is accessible from within the cluster
+        echo "Verifying Eureka accessibility..."
+        EUREKA_POD=$(kubectl get pods -n ${NAMESPACE} -l app=service-discovery -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+        if [ -n "$EUREKA_POD" ]; then
+          # Test if Eureka responds on its health endpoint
+          kubectl exec -n ${NAMESPACE} ${EUREKA_POD} -- wget -q -O- http://localhost:8761/actuator/health 2>/dev/null && echo "✓ Eureka is healthy" || echo "⚠ Eureka health check failed"
+          # Test DNS resolution
+          kubectl exec -n ${NAMESPACE} ${EUREKA_POD} -- nslookup service-discovery.${NAMESPACE}.svc.cluster.local 2>/dev/null | head -3 || echo "⚠ DNS resolution test failed"
+        fi
+        
         # Cloud Config (if exists, deploy before other services)
         if [ -f "k8s/base/cloud-config.yaml" ]; then
           echo "Deploying Cloud Config..."
@@ -153,6 +168,19 @@ jobs:
                 -e "s|\${NAMESPACE}|${NAMESPACE}|g" \
                 -e "s|\${IMAGE_TAG}|${IMAGE_TAG}|g" \
                 k8s/base/${service}.yaml | kubectl apply -f -
+            
+            # Wait a bit for pod to start
+            sleep 5
+            
+            # Check if pod is starting (may be in CrashLoopBackOff, but that's OK if it's just DB)
+            SERVICE_POD=$(kubectl get pods -n ${NAMESPACE} -l app=$service -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+            if [ -n "$SERVICE_POD" ]; then
+              echo "    Pod ${SERVICE_POD} status:"
+              kubectl get pod ${SERVICE_POD} -n ${NAMESPACE} -o jsonpath='{.status.phase}' 2>/dev/null || echo "unknown"
+              # Show recent logs if pod exists
+              echo "    Recent logs (last 5 lines):"
+              kubectl logs -n ${NAMESPACE} ${SERVICE_POD} --tail=5 2>&1 | head -5 || echo "    (logs not available yet)"
+            fi
           fi
         done
         
@@ -213,11 +241,26 @@ jobs:
             echo "Registered services count: $REGISTERED_COUNT"
             
             # Check if we have at least 3 services registered (API-GATEWAY + at least 2 business services)
-            # Note: Services may show as DOWN in Eureka if health checks fail (e.g., no DB), but they're still registered
+            # Also check if services are UP (not just registered)
+            UP_SERVICES=$(echo "$EUREKA_RESPONSE" | grep -o "<status>UP</status>" | wc -l)
+            DOWN_SERVICES=$(echo "$EUREKA_RESPONSE" | grep -o "<status>DOWN</status>" | wc -l)
+            echo "Services UP: $UP_SERVICES, Services DOWN: $DOWN_SERVICES"
+            
+            # Check if we have at least 3 services registered
             if [ "$REGISTERED_COUNT" -ge 3 ]; then
-              SERVICES_REGISTERED=true
-              echo "✓ Required services are registered in Eureka (some may be DOWN due to missing DB, but routing should work)"
-              break
+              # If we have at least 2 services UP, that's good enough
+              if [ "$UP_SERVICES" -ge 2 ]; then
+                SERVICES_REGISTERED=true
+                echo "✓ Required services are registered and UP in Eureka"
+                break
+              elif [ "$UP_SERVICES" -ge 1 ] && [ "$RETRY_COUNT" -ge 20 ]; then
+                # After 20 retries (200 seconds), accept if at least 1 service is UP
+                SERVICES_REGISTERED=true
+                echo "✓ At least 1 service is UP after long wait - proceeding"
+                break
+              else
+                echo "Services registered but not all UP yet. UP: $UP_SERVICES, waiting more..."
+              fi
             fi
           else
             echo "Eureka response empty or no services found yet"
@@ -225,7 +268,9 @@ jobs:
           
           RETRY_COUNT=$((RETRY_COUNT + 1))
           echo "Waiting for services to register... ($RETRY_COUNT/$MAX_RETRIES)"
-          sleep 10
+          if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+            sleep 10
+          fi
         done
         
         # Stop Eureka port-forward
@@ -245,9 +290,25 @@ jobs:
           echo "✓ Services registered in Eureka (some may be DOWN due to missing DB, but routing should work)"
         fi
         
-        # Additional wait for API Gateway to discover services
-        echo "Waiting for API Gateway to discover services..."
-        sleep 30
+        # Additional wait for API Gateway to discover services and for services to be fully ready
+        echo "Waiting for API Gateway to discover services and services to be fully ready..."
+        sleep 60  # Increased wait time for services to be fully operational
+        
+        # Final verification: Check service status and Eureka registration
+        echo "=== Final Service Status ==="
+        kubectl get pods -n ${NAMESPACE} -o wide
+        echo ""
+        echo "=== Service Logs (checking for Eureka registration errors) ==="
+        for service in user-service product-service order-service shipping-service; do
+          SERVICE_POD=$(kubectl get pods -n ${NAMESPACE} -l app=$service -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          if [ -n "$SERVICE_POD" ]; then
+            echo "--- $service ($SERVICE_POD) ---"
+            # Check for Eureka-related errors in logs
+            kubectl logs -n ${NAMESPACE} ${SERVICE_POD} 2>&1 | grep -i "eureka\|registration\|discovery" | tail -3 || echo "  (no Eureka-related logs found)"
+            # Check if service is trying to connect to Eureka
+            kubectl logs -n ${NAMESPACE} ${SERVICE_POD} 2>&1 | grep -i "service-discovery\|8761" | tail -2 || echo "  (no Eureka connection attempts found)"
+          fi
+        done
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -381,6 +442,21 @@ jobs:
         echo "Spawn rate: 10"
         echo "Duration: 300 seconds"
         
+        # Test API Gateway connectivity before running tests
+        echo "Testing API Gateway connectivity..."
+        for i in {1..5}; do
+          TEST_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "http://${API_GATEWAY_URL}/actuator/health" --max-time 5 || echo "000")
+          if [ "$TEST_RESPONSE" = "200" ]; then
+            echo "✓ API Gateway is reachable (HTTP 200)"
+            break
+          else
+            echo "⚠ API Gateway test $i/5: HTTP $TEST_RESPONSE"
+            sleep 2
+          fi
+        done
+        
+        # Run Locust with detailed logging
+        echo "Starting Locust performance tests..."
         locust -f locustfile.py \
           --host=http://${API_GATEWAY_URL} \
           --users=50 \
@@ -388,8 +464,22 @@ jobs:
           --run-time=300s \
           --html=performance_report.html \
           --csv=performance_data \
-          --headless || {
-          echo "Warning: Performance tests completed with errors (services may not be fully ready)"
+          --loglevel=INFO \
+          --headless 2>&1 | tee locust_output.log || {
+          echo "⚠ Performance tests completed with errors"
+          echo "Checking error details..."
+          
+          # Try to get error details from logs
+          if [ -f locust_output.log ]; then
+            echo "=== Last 50 lines of Locust output ==="
+            tail -50 locust_output.log || true
+          fi
+          
+          # Check if it's a connectivity issue
+          FINAL_TEST=$(curl -s -o /dev/null -w "%{http_code}" "http://${API_GATEWAY_URL}/actuator/health" --max-time 5 || echo "000")
+          if [ "$FINAL_TEST" != "200" ]; then
+            echo "❌ API Gateway is not reachable (HTTP $FINAL_TEST) - this explains the failures"
+          fi
         }
     
     - name: Generate Performance Summary
