@@ -49,7 +49,7 @@ variable "allowed_cidr_blocks" {
 variable "enable_https" {
   description = "Enable HTTPS on ALB"
   type        = bool
-  default     = true
+  default     = false  # Cambiar a true cuando tengas certificado SSL
 }
 
 variable "certificate_arn" {

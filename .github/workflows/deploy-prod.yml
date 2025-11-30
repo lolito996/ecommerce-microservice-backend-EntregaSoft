@@ -1,0 +1,340 @@
+name: Production Deploy (ECS Fargate + GHCR)
+
+permissions:
+  contents: write
+  packages: read
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  DOCKER_REGISTRY: ghcr.io
+  GHCR_USER: lolito996
+  ECS_CLUSTER: prod-ecommerce-cluster
+
+jobs:
+  fetch-stage-tag:
+    name: Find latest Stage release
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.set.outputs.image_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get latest stage release tag
+        id: set
+        run: |
+          OWNER=${{ github.repository_owner }}
+          REPO=$(basename $GITHUB_REPOSITORY)
+          echo "Looking for latest stage- release in $OWNER/$REPO..."
+          
+          resp=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/$OWNER/$REPO/releases?per_page=100")
+          
+          tag=$(echo "$resp" | jq -r 'sort_by(.created_at) | reverse[] | select(.tag_name | startswith("stage-")) | .tag_name' | head -n1)
+          
+          if [ -z "$tag" ] || [ "$tag" = "null" ]; then
+            echo "⚠️  No stage release found, using 'latest'"
+            echo "image_tag=latest" >> "$GITHUB_OUTPUT"
+          else
+            version=${tag#stage-}
+            echo "Found stage release: $tag -> production version: $version"
+            echo "image_tag=$version" >> "$GITHUB_OUTPUT"
+          fi
+
+  ecs-deploy:
+    name: Deploy ${{ matrix.service.name }} to ECS
+    environment:
+      name: production
+    runs-on: ubuntu-latest
+    needs: fetch-stage-tag
+    strategy:
+      max-parallel: 3
+      fail-fast: false
+      matrix:
+        service:
+          - name: api-gateway
+            port: 8080
+            cpu: 512
+            memory: 1024
+          - name: user-service
+            port: 8081
+            cpu: 512
+            memory: 1024
+          - name: product-service
+            port: 8082
+            cpu: 512
+            memory: 1024
+          - name: order-service
+            port: 8083
+            cpu: 512
+            memory: 1024
+          - name: payment-service
+            port: 8084
+            cpu: 512
+            memory: 1024
+          - name: shipping-service
+            port: 8085
+            cpu: 512
+            memory: 1024
+          - name: favourite-service
+            port: 8086
+            cpu: 512
+            memory: 1024
+          - name: proxy-client
+            port: 8087
+            cpu: 512
+            memory: 1024
+          - name: service-discovery
+            port: 8761
+            cpu: 512
+            memory: 1024
+          - name: cloud-config
+            port: 8888
+            cpu: 512
+            memory: 1024
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ env.GHCR_USER }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify image exists in GHCR
+        run: |
+          IMAGE="${{ env.DOCKER_REGISTRY }}/${{ env.GHCR_USER }}/${{ matrix.service.name }}:${{ needs.fetch-stage-tag.outputs.image_tag }}"
+          echo "Verifying image: $IMAGE"
+          
+          if docker pull $IMAGE; then
+            echo "✅ Image found and pulled successfully"
+          else
+            echo "❌ Image not found in GHCR. Run migration script first!"
+            exit 1
+          fi
+
+      - name: Create CloudWatch Log Group
+        continue-on-error: true
+        run: |
+          aws logs create-log-group \
+            --log-group-name "/ecs/prod-${{ matrix.service.name }}" \
+            --region ${{ env.AWS_REGION }} || echo "Log group already exists"
+
+      - name: Register ECS Task Definition
+        id: task-def
+        run: |
+          IMAGE_TAG="${{ needs.fetch-stage-tag.outputs.image_tag }}"
+          SERVICE="${{ matrix.service.name }}"
+          PORT="${{ matrix.service.port }}"
+          CPU="${{ matrix.service.cpu }}"
+          MEMORY="${{ matrix.service.memory }}"
+          
+          cat > task-def-${SERVICE}.json <<EOF
+          {
+            "family": "prod-${SERVICE}",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "${CPU}",
+            "memory": "${MEMORY}",
+            "executionRoleArn": "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/ecsTaskExecutionRole",
+            "taskRoleArn": "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/ecsTaskExecutionRole",
+            "containerDefinitions": [{
+              "name": "${SERVICE}",
+              "image": "${{ env.DOCKER_REGISTRY }}/${{ env.GHCR_USER }}/${SERVICE}:${IMAGE_TAG}",
+              "portMappings": [{"containerPort": ${PORT}, "protocol": "tcp"}],
+              "environment": [
+                {"name": "SPRING_PROFILES_ACTIVE", "value": "prod"},
+                {"name": "AWS_REGION", "value": "${{ env.AWS_REGION }}"}
+              ],
+              "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                  "awslogs-group": "/ecs/prod-${SERVICE}",
+                  "awslogs-region": "${{ env.AWS_REGION }}",
+                  "awslogs-stream-prefix": "ecs"
+                }
+              },
+              "healthCheck": {
+                "command": ["CMD-SHELL", "curl -f http://localhost:${PORT}/actuator/health || exit 1"],
+                "interval": 30,
+                "timeout": 5,
+                "retries": 3,
+                "startPeriod": 60
+              }
+            }]
+          }
+          EOF
+          
+          aws ecs register-task-definition \
+            --cli-input-json file://task-def-${SERVICE}.json \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Update ECS Service
+        run: |
+          SERVICE="${{ matrix.service.name }}"
+          
+          if aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services prod-${SERVICE} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'services[0].status' \
+            --output text 2>/dev/null | grep -q "ACTIVE"; then
+            
+            echo "✅ Updating existing service: prod-${SERVICE}"
+            aws ecs update-service \
+              --cluster ${{ env.ECS_CLUSTER }} \
+              --service prod-${SERVICE} \
+              --task-definition prod-${SERVICE} \
+              --force-new-deployment \
+              --region ${{ env.AWS_REGION }}
+          else
+            echo "⚠️  Service prod-${SERVICE} not found. Create cluster & services first with Terraform."
+            exit 1
+          fi
+
+      - name: Wait for service stability
+        run: |
+          SERVICE="${{ matrix.service.name }}"
+          echo "⏳ Waiting for prod-${SERVICE} to stabilize..."
+          
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services prod-${SERVICE} \
+            --region ${{ env.AWS_REGION }} \
+            || echo "⚠️  Service stability check timed out"
+
+      - name: Verify deployment
+        run: |
+          SERVICE="${{ matrix.service.name }}"
+          
+          STATUS=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services prod-${SERVICE} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'services[0].[runningCount,desiredCount]' \
+            --output text)
+          
+          RUNNING=$(echo $STATUS | awk '{print $1}')
+          DESIRED=$(echo $STATUS | awk '{print $2}')
+          
+          echo "Service status: $RUNNING/$DESIRED"
+          
+          if [ "$RUNNING" -eq "$DESIRED" ] && [ "$RUNNING" -gt 0 ]; then
+            echo "✅ Deployment successful: prod-${SERVICE}"
+          else
+            echo "⚠️  Deployment incomplete: prod-${SERVICE} ($RUNNING/$DESIRED)"
+            exit 1
+          fi
+
+  create-release:
+    name: Create Production Release
+    runs-on: ubuntu-latest
+    needs: [fetch-stage-tag, ecs-deploy]
+    if: success()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ needs.fetch-stage-tag.outputs.image_tag }}
+          release_name: Production v${{ needs.fetch-stage-tag.outputs.image_tag }}
+          body: |
+            🚀 **Production Release**
+            
+            **Version:** ${{ needs.fetch-stage-tag.outputs.image_tag }}
+            **Platform:** AWS ECS Fargate
+            **Cluster:** ${{ env.ECS_CLUSTER }}
+            **Registry:** GitHub Container Registry (GHCR)
+            **User:** ${{ env.GHCR_USER }}
+            
+            **Deployed by:** ${{ github.actor }}
+            **Commit:** ${{ github.sha }}
+            **Date:** ${{ github.event.head_commit.timestamp }}
+            
+            ## 📦 Container Images
+            
+            All images available at: `ghcr.io/${{ env.GHCR_USER }}/{service}:${{ needs.fetch-stage-tag.outputs.image_tag }}`
+            
+            ### Application Services
+            - `ghcr.io/${{ env.GHCR_USER }}/api-gateway:${{ needs.fetch-stage-tag.outputs.image_tag }}`
+            - `ghcr.io/${{ env.GHCR_USER }}/user-service:${{ needs.fetch-stage-tag.outputs.image_tag }}`
+            - `ghcr.io/${{ env.GHCR_USER }}/product-service:${{ needs.fetch-stage-tag.outputs.image_tag }}`
+            - `ghcr.io/${{ env.GHCR_USER }}/order-service:${{ needs.fetch-stage-tag.outputs.image_tag }}`
+            - `ghcr.io/${{ env.GHCR_USER }}/payment-service:${{ needs.fetch-stage-tag.outputs.image_tag }}`
+            - `ghcr.io/${{ env.GHCR_USER }}/shipping-service:${{ needs.fetch-stage-tag.outputs.image_tag }}`
+            - `ghcr.io/${{ env.GHCR_USER }}/favourite-service:${{ needs.fetch-stage-tag.outputs.image_tag }}`
+            - `ghcr.io/${{ env.GHCR_USER }}/proxy-client:${{ needs.fetch-stage-tag.outputs.image_tag }}`
+            
+            ### Infrastructure Services
+            - `ghcr.io/${{ env.GHCR_USER }}/service-discovery:${{ needs.fetch-stage-tag.outputs.image_tag }}`
+            - `ghcr.io/${{ env.GHCR_USER }}/cloud-config:${{ needs.fetch-stage-tag.outputs.image_tag }}`
+            
+            ## ✅ Quality Gates Passed
+            - ✅ Unit Tests
+            - ✅ Integration Tests  
+            - ✅ Code Quality (SonarQube)
+            - ✅ Container Build
+            - ✅ GHCR Image Availability
+            - ✅ ECS Deployment
+          draft: false
+          prerelease: false
+
+  notify-success:
+    name: Deployment Success
+    runs-on: ubuntu-latest
+    if: success()
+    needs: [fetch-stage-tag, ecs-deploy, create-release]
+    steps:
+      - name: Success Notification
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ PRODUCTION DEPLOYMENT SUCCESSFUL!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "📦 Repository: ${{ github.repository }}"
+          echo "🏷️  Version: v${{ needs.fetch-stage-tag.outputs.image_tag }}"
+          echo "🔗 Commit: ${{ github.sha }}"
+          echo "👤 Deployed by: ${{ github.actor }}"
+          echo "🌍 Cluster: ${{ env.ECS_CLUSTER }}"
+          echo "📍 Region: ${{ env.AWS_REGION }}"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  notify-failure:
+    name: Deployment Failure
+    runs-on: ubuntu-latest
+    if: failure()
+    needs: [ecs-deploy]
+    steps:
+      - name: Failure Notification
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "❌ PRODUCTION DEPLOYMENT FAILED!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "📦 Repository: ${{ github.repository }}"
+          echo "🔗 Commit: ${{ github.sha }}"
+          echo "👤 Attempted by: ${{ github.actor }}"
+          echo ""
+          echo "🔍 Check logs at:"
+          echo "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
