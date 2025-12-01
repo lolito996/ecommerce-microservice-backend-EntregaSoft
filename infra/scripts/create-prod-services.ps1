@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 $CLUSTER = "prod-ecommerce-cluster"
 $REGION = "us-east-1"
 $TARGET_GROUP_ARN = "arn:aws:elasticloadbalancing:us-east-1:533924338325:targetgroup/prod-ecommerce-api-gw-tg/81713d0500e73136"
+$NAMESPACE_ID = "ns-nhyybi4hheewu3ab"  # Service Discovery namespace
 
 # Obtener VPC y Subnets del cluster
 Write-Host "🔍 Obteniendo configuración de red..." -ForegroundColor Cyan
@@ -87,7 +88,9 @@ foreach ($svc in $services) {
     "portMappings": [{"containerPort": $($svc.port), "protocol": "tcp"}],
     "environment": [
       {"name": "SPRING_PROFILES_ACTIVE", "value": "prod"},
-      {"name": "AWS_REGION", "value": "$REGION"}
+      {"name": "AWS_REGION", "value": "$REGION"},
+      {"name": "EUREKA_CLIENT_SERVICEURL_DEFAULTZONE", "value": "http://service-discovery.prod.ecommerce.local:8761/eureka/"},
+      {"name": "EUREKA_INSTANCE_PREFER_IP_ADDRESS", "value": "true"}
     ],
     "logConfiguration": {
       "logDriver": "awslogs",
@@ -102,7 +105,7 @@ foreach ($svc in $services) {
       "interval": 30,
       "timeout": 5,
       "retries": 3,
-      "startPeriod": 60
+      "startPeriod": 90
     }
   }]
 }
@@ -125,6 +128,20 @@ foreach ($svc in $services) {
     
     Write-Host "  ✅ Task definition registrada: $taskDefArn" -ForegroundColor Green
     
+    # Crear servicio en Service Discovery primero
+    Write-Host "  🔍 Registrando en Service Discovery..." -ForegroundColor Gray
+    
+    $discoveryService = aws servicediscovery create-service `
+        --name "$($svc.name)" `
+        --namespace-id $NAMESPACE_ID `
+        --dns-config "NamespaceId=$NAMESPACE_ID,DnsRecords=[{Type=A,TTL=60}]" `
+        --health-check-custom-config "FailureThreshold=1" `
+        --region $REGION `
+        --query 'Service.Id' `
+        --output text
+    
+    Write-Host "  ✅ Service Discovery ID: $discoveryService" -ForegroundColor Green
+    
     # Crear servicio ECS
     Write-Host "  🚀 Creando servicio ECS..." -ForegroundColor Gray
     
@@ -140,6 +157,7 @@ foreach ($svc in $services) {
             --network-configuration "awsvpcConfiguration={subnets=[$subnetList],securityGroups=[$sgId],assignPublicIp=DISABLED}" `
             --load-balancers "targetGroupArn=$TARGET_GROUP_ARN,containerName=$($svc.name),containerPort=$($svc.port)" `
             --health-check-grace-period-seconds 120 `
+            --service-registries "registryArn=arn:aws:servicediscovery:${REGION}:533924338325:service/$discoveryService" `
             --region $REGION | Out-Null
     } else {
         aws ecs create-service `
@@ -150,6 +168,7 @@ foreach ($svc in $services) {
             --launch-type FARGATE `
             --platform-version LATEST `
             --network-configuration "awsvpcConfiguration={subnets=[$subnetList],securityGroups=[$sgId],assignPublicIp=DISABLED}" `
+            --service-registries "registryArn=arn:aws:servicediscovery:${REGION}:533924338325:service/$discoveryService" `
             --region $REGION | Out-Null
     }
     

@@ -38,8 +38,8 @@ jobs:
           tag=$(echo "$resp" | jq -r 'sort_by(.created_at) | reverse[] | select(.tag_name | startswith("stage-")) | .tag_name' | head -n1)
           
           if [ -z "$tag" ] || [ "$tag" = "null" ]; then
-            echo "⚠️  No stage release found, using 'latest'"
-            echo "image_tag=latest" >> "$GITHUB_OUTPUT"
+            echo "⚠️  No stage release found, using v1.0.0 as default"
+            echo "image_tag=1.0.0" >> "$GITHUB_OUTPUT"
           else
             version=${tag#stage-}
             echo "Found stage release: $tag -> production version: $version"
@@ -143,6 +143,9 @@ jobs:
           CPU="${{ matrix.service.cpu }}"
           MEMORY="${{ matrix.service.memory }}"
           
+          # Configurar Eureka URL usando Service Discovery
+          EUREKA_URL="http://service-discovery.prod.ecommerce.local:8761/eureka/"
+          
           cat > task-def-${SERVICE}.json <<EOF
           {
             "family": "prod-${SERVICE}",
@@ -158,7 +161,9 @@ jobs:
               "portMappings": [{"containerPort": ${PORT}, "protocol": "tcp"}],
               "environment": [
                 {"name": "SPRING_PROFILES_ACTIVE", "value": "prod"},
-                {"name": "AWS_REGION", "value": "${{ env.AWS_REGION }}"}
+                {"name": "AWS_REGION", "value": "${{ env.AWS_REGION }}"},
+                {"name": "EUREKA_CLIENT_SERVICEURL_DEFAULTZONE", "value": "${EUREKA_URL}"},
+                {"name": "EUREKA_INSTANCE_PREFER_IP_ADDRESS", "value": "true"}
               ],
               "logConfiguration": {
                 "logDriver": "awslogs",
@@ -173,7 +178,7 @@ jobs:
                 "interval": 30,
                 "timeout": 5,
                 "retries": 3,
-                "startPeriod": 60
+                "startPeriod": 90
               }
             }]
           }
