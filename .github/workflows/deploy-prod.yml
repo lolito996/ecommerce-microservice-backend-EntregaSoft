@@ -117,7 +117,7 @@ jobs:
 
       - name: Verify image exists in GHCR
         run: |
-          IMAGE="${{ env.DOCKER_REGISTRY }}/${{ env.GHCR_USER }}/${{ matrix.service.name }}:${{ needs.fetch-stage-tag.outputs.image_tag }}"
+          IMAGE="${{ env.DOCKER_REGISTRY }}/${{ env.GHCR_USER }}/${{ matrix.service.name }}:latest"
           echo "Verifying image: $IMAGE"
           
           if docker pull $IMAGE; then
@@ -137,7 +137,7 @@ jobs:
       - name: Register ECS Task Definition
         id: task-def
         run: |
-          IMAGE_TAG="${{ needs.fetch-stage-tag.outputs.image_tag }}"
+          IMAGE_TAG="latest"
           SERVICE="${{ matrix.service.name }}"
           PORT="${{ matrix.service.port }}"
           CPU="${{ matrix.service.cpu }}"
