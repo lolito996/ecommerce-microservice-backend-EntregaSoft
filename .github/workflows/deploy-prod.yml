@@ -254,17 +254,37 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Generate incremental version
+        id: version
+        run: |
+          # Obtener último release de producción
+          LAST_VERSION=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases" | \
+            jq -r '[.[] | select(.tag_name | startswith("v1.0."))] | .[0].tag_name // "v1.0.0"')
+          
+          # Extraer número de patch
+          if [ "$LAST_VERSION" = "v1.0.0" ]; then
+            NEW_VERSION="v1.0.1"
+          else
+            PATCH=$(echo $LAST_VERSION | cut -d'.' -f3)
+            NEW_PATCH=$((PATCH + 1))
+            NEW_VERSION="v1.0.${NEW_PATCH}"
+          fi
+          
+          echo "release_tag=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Generated release tag: ${NEW_VERSION}"
+
       - name: Create GitHub Release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v${{ needs.fetch-stage-tag.outputs.image_tag }}
-          release_name: Production v${{ needs.fetch-stage-tag.outputs.image_tag }}
+          tag_name: ${{ steps.version.outputs.release_tag }}
+          release_name: Production ${{ steps.version.outputs.release_tag }}
           body: |
             🚀 **Production Release**
             
-            **Version:** ${{ needs.fetch-stage-tag.outputs.image_tag }}
+            **Version:** ${{ steps.version.outputs.release_tag }}
+            **Base Version:** ${{ needs.fetch-stage-tag.outputs.image_tag }}
             **Platform:** AWS ECS Fargate
             **Cluster:** ${{ env.ECS_CLUSTER }}
             **Registry:** GitHub Container Registry (GHCR)
@@ -276,21 +296,21 @@ jobs:
             
             ## 📦 Container Images
             
-            All images available at: `ghcr.io/${{ env.GHCR_USER }}/{service}:${{ needs.fetch-stage-tag.outputs.image_tag }}`
+            All images available at: `ghcr.io/${{ env.GHCR_USER }}/{service}:latest`
             
             ### Application Services
-            - `ghcr.io/${{ env.GHCR_USER }}/api-gateway:${{ needs.fetch-stage-tag.outputs.image_tag }}`
-            - `ghcr.io/${{ env.GHCR_USER }}/user-service:${{ needs.fetch-stage-tag.outputs.image_tag }}`
-            - `ghcr.io/${{ env.GHCR_USER }}/product-service:${{ needs.fetch-stage-tag.outputs.image_tag }}`
-            - `ghcr.io/${{ env.GHCR_USER }}/order-service:${{ needs.fetch-stage-tag.outputs.image_tag }}`
-            - `ghcr.io/${{ env.GHCR_USER }}/payment-service:${{ needs.fetch-stage-tag.outputs.image_tag }}`
-            - `ghcr.io/${{ env.GHCR_USER }}/shipping-service:${{ needs.fetch-stage-tag.outputs.image_tag }}`
-            - `ghcr.io/${{ env.GHCR_USER }}/favourite-service:${{ needs.fetch-stage-tag.outputs.image_tag }}`
-            - `ghcr.io/${{ env.GHCR_USER }}/proxy-client:${{ needs.fetch-stage-tag.outputs.image_tag }}`
+            - `ghcr.io/${{ env.GHCR_USER }}/api-gateway:latest`
+            - `ghcr.io/${{ env.GHCR_USER }}/user-service:latest`
+            - `ghcr.io/${{ env.GHCR_USER }}/product-service:latest`
+            - `ghcr.io/${{ env.GHCR_USER }}/order-service:latest`
+            - `ghcr.io/${{ env.GHCR_USER }}/payment-service:latest`
+            - `ghcr.io/${{ env.GHCR_USER }}/shipping-service:latest`
+            - `ghcr.io/${{ env.GHCR_USER }}/favourite-service:latest`
+            - `ghcr.io/${{ env.GHCR_USER }}/proxy-client:latest`
             
             ### Infrastructure Services
-            - `ghcr.io/${{ env.GHCR_USER }}/service-discovery:${{ needs.fetch-stage-tag.outputs.image_tag }}`
-            - `ghcr.io/${{ env.GHCR_USER }}/cloud-config:${{ needs.fetch-stage-tag.outputs.image_tag }}`
+            - `ghcr.io/${{ env.GHCR_USER }}/service-discovery:latest`
+            - `ghcr.io/${{ env.GHCR_USER }}/cloud-config:latest`
             
             ## ✅ Quality Gates Passed
             - ✅ Unit Tests
@@ -315,7 +335,7 @@ jobs:
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo ""
           echo "📦 Repository: ${{ github.repository }}"
-          echo "🏷️  Version: v${{ needs.fetch-stage-tag.outputs.image_tag }}"
+          echo "🏷️  Base Version: ${{ needs.fetch-stage-tag.outputs.image_tag }}"
           echo "🔗 Commit: ${{ github.sha }}"
           echo "👤 Deployed by: ${{ github.actor }}"
           echo "🌍 Cluster: ${{ env.ECS_CLUSTER }}"
