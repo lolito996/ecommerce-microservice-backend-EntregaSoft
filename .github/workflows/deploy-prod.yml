@@ -94,7 +94,7 @@ jobs:
             cpu: 512
             memory: 1024
           - name: cloud-config
-            port: 8888
+            port: 9296
             cpu: 512
             memory: 1024
     steps:
