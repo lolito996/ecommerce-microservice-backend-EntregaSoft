@@ -1,0 +1,15 @@
+FROM prom/prometheus:latest
+
+# Copiar configuración personalizada
+COPY prometheus-dev.yml /etc/prometheus/prometheus.yml
+
+# Exponer puerto
+EXPOSE 9090
+
+# Comando con soporte de subpath
+CMD ["--config.file=/etc/prometheus/prometheus.yml", \
+     "--storage.tsdb.path=/prometheus", \
+     "--web.console.libraries=/usr/share/prometheus/console_libraries", \
+     "--web.console.templates=/usr/share/prometheus/consoles", \
+     "--web.external-url=http://dev-ecommerce-alb-1748132991.us-east-1.elb.amazonaws.com/prometheus", \
+     "--web.route-prefix=/prometheus"]

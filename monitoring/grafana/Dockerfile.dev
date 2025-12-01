@@ -1,0 +1,15 @@
+FROM grafana/grafana:latest
+
+# Copiar configuración personalizada
+COPY grafana.ini /etc/grafana/grafana.ini
+
+# Copiar dashboards personalizados
+COPY dashboards /etc/grafana/provisioning/dashboards
+
+# Copiar datasources
+COPY datasources /etc/grafana/provisioning/datasources
+
+# Exponer puerto
+EXPOSE 3000
+
+USER grafana
