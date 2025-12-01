@@ -12,52 +12,42 @@ class EcommerceUser(HttpUser):
         self.product_ids = []
         self.order_id = None
     
-    def safe_request(self, method, url, **kwargs):
-        """Helper method to make requests with better error handling"""
-        try:
-            if method.upper() == "GET":
-                response = self.client.get(url, catch_response=True, **kwargs)
-            elif method.upper() == "POST":
-                response = self.client.post(url, catch_response=True, **kwargs)
-            else:
-                response = self.client.request(method, url, catch_response=True, **kwargs)
-            
-            # Accept 200, 201, 404 (not found but service is working), 500 (internal error but service is working)
-            # Reject 503 (service unavailable), 502 (bad gateway), 504 (gateway timeout)
-            if response.status_code in [200, 201]:
-                response.success()
-                return response
-            elif response.status_code == 404:
-                # 404 means route exists but resource not found - service is working
-                response.success()
-                return response
-            elif response.status_code == 500:
-                # 500 means service error but service is registered and working
-                response.success()
-                return response
-            elif response.status_code in [503, 502, 504]:
-                # These mean service is not available or gateway can't reach it
-                response.failure(f"Service unavailable: HTTP {response.status_code}")
-                return response
-            else:
-                # Other status codes
-                response.failure(f"Unexpected status: HTTP {response.status_code}")
-                return response
-        except Exception as e:
-            # Connection errors, timeouts, etc.
-            return None
+    def _handle_response(self, response):
+        """Handle response status codes"""
+        # Accept 200, 201, 404 (not found but service is working), 500 (internal error but service is working)
+        # Reject 503 (service unavailable), 502 (bad gateway), 504 (gateway timeout)
+        if response.status_code in [200, 201]:
+            response.success()
+        elif response.status_code == 404:
+            # 404 means route exists but resource not found - service is working
+            response.success()
+        elif response.status_code == 500:
+            # 500 means service error but service is registered and working
+            response.success()
+        elif response.status_code in [503, 502, 504]:
+            # These mean service is not available or gateway can't reach it
+            response.failure(f"Service unavailable: HTTP {response.status_code}")
+        else:
+            # Other status codes
+            response.failure(f"Unexpected status: HTTP {response.status_code}")
         
     @task(3)
     def view_products(self):
         """View product catalog"""
-        response = self.safe_request("GET", "/product-service/api/products")
-        if response and response.status_code == 200:
-            try:
-                products = response.json()
-                if 'collection' in products and products['collection']:
-                    self.product_ids = [p['productId'] for p in products['collection'][:5]]
-            except:
-                pass  # Ignore JSON parsing errors
+        try:
+            response = self.client.get("/product-service/api/products", catch_response=True)
+            with response:
+                self._handle_response(response)
+                if response.status_code == 200:
+                    try:
+                        products = response.json()
+                        if 'collection' in products and products['collection']:
+                            self.product_ids = [p['productId'] for p in products['collection'][:5]]
+                    except:
+                        pass  # Ignore JSON parsing errors
+        except Exception as e:
+            # Connection errors will be caught by Locust automatically
+            pass
     
     @task(2)
     def create_user(self):
@@ -79,19 +69,29 @@ class EcommerceUser(HttpUser):
                 "isCredentialsNonExpired": True 
             }
         }
-        response = self.safe_request("POST", "/user-service/api/users", json=user_data)
-        if response and response.status_code in [200, 201]:
-            try:
-                result = response.json()
-                self.user_id = result.get('userId')
-            except:
-                pass
+        try:
+            response = self.client.post("/user-service/api/users", json=user_data, catch_response=True)
+            with response:
+                self._handle_response(response)
+                if response.status_code in [200, 201]:
+                    try:
+                        result = response.json()
+                        self.user_id = result.get('userId')
+                    except:
+                        pass
+        except Exception as e:
+            pass
     
     @task(2)
     def get_user(self):
         """Get user details"""
         if self.user_id:
-            self.safe_request("GET", f"/user-service/api/users/{self.user_id}")
+            try:
+                response = self.client.get(f"/user-service/api/users/{self.user_id}", catch_response=True)
+                with response:
+                    self._handle_response(response)
+            except Exception as e:
+                pass
     
     @task(1)
     def create_order(self):
@@ -105,13 +105,18 @@ class EcommerceUser(HttpUser):
                     "cartId": 3
                 }
             }
-            response = self.safe_request("POST", "/order-service/api/orders", json=order_data)
-            if response and response.status_code in [200, 201]:
-                try:
-                    result = response.json()
-                    self.order_id = result.get('orderId')
-                except:
-                    pass
+            try:
+                response = self.client.post("/order-service/api/orders", json=order_data, catch_response=True)
+                with response:
+                    self._handle_response(response)
+                    if response.status_code in [200, 201]:
+                        try:
+                            result = response.json()
+                            self.order_id = result.get('orderId')
+                        except:
+                            pass
+            except Exception as e:
+                pass
     
     @task(1)
     def add_order_item(self):
@@ -122,17 +127,32 @@ class EcommerceUser(HttpUser):
                 "productId": 4,
                 "orderedQuantity": 1
             }
-            self.safe_request("POST", "/shipping-service/api/shippings", json=item_data)
+            try:
+                response = self.client.post("/shipping-service/api/shippings", json=item_data, catch_response=True)
+                with response:
+                    self._handle_response(response)
+            except Exception as e:
+                pass
     
     @task(1)
     def view_orders(self):
         """View all orders"""
-        self.safe_request("GET", "/order-service/api/orders")
+        try:
+            response = self.client.get("/order-service/api/orders", catch_response=True)
+            with response:
+                self._handle_response(response)
+        except Exception as e:
+            pass
     
     @task(1)
     def view_order_items(self):
         """View order items"""
-        self.safe_request("GET", "/shipping-service/api/shippings")
+        try:
+            response = self.client.get("/shipping-service/api/shippings", catch_response=True)
+            with response:
+                self._handle_response(response)
+        except Exception as e:
+            pass
 
 
 
