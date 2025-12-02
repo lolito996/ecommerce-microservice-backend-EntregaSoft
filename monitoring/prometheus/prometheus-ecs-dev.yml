@@ -1,0 +1,62 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'microservices-ecs'
+    environment: 'dev'
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # ECS Service Discovery usando nombres internos de ECS
+  - job_name: 'api-gateway'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['dev-api-gateway.dev-ecommerce-cluster:8080']
+
+  - job_name: 'user-service'
+    metrics_path: '/user-service/actuator/prometheus'
+    static_configs:
+      - targets: ['dev-user-service.dev-ecommerce-cluster:8081']
+
+  - job_name: 'product-service'
+    metrics_path: '/product-service/actuator/prometheus'
+    static_configs:
+      - targets: ['dev-product-service.dev-ecommerce-cluster:8082']
+
+  - job_name: 'order-service'
+    metrics_path: '/order-service/actuator/prometheus'
+    static_configs:
+      - targets: ['dev-order-service.dev-ecommerce-cluster:8083']
+
+  - job_name: 'payment-service'
+    metrics_path: '/payment-service/actuator/prometheus'
+    static_configs:
+      - targets: ['dev-payment-service.dev-ecommerce-cluster:8084']
+
+  - job_name: 'shipping-service'
+    metrics_path: '/shipping-service/actuator/prometheus'
+    static_configs:
+      - targets: ['dev-shipping-service.dev-ecommerce-cluster:8085']
+
+  - job_name: 'favourite-service'
+    metrics_path: '/favourite-service/actuator/prometheus'
+    static_configs:
+      - targets: ['dev-favourite-service.dev-ecommerce-cluster:8086']
+
+  - job_name: 'service-discovery'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['dev-service-discovery.dev-ecommerce-cluster:8761']
+
+  - job_name: 'cloud-config'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['dev-cloud-config.dev-ecommerce-cluster:8888']
+
+  - job_name: 'proxy-client'
+    metrics_path: '/app/actuator/prometheus'
+    static_configs:
+      - targets: ['dev-proxy-client.dev-ecommerce-cluster:8087']

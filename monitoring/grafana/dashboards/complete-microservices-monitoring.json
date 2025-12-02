@@ -1,20 +1,20 @@
 {
   "dashboard": {
-    "title": "All Services Overview",
-    "tags": ["microservices", "overview", "all-services"],
+    "title": "Complete Microservices Monitoring",
+    "tags": ["microservices", "monitoring", "ecommerce"],
     "timezone": "browser",
     "schemaVersion": 27,
-    "version": 2,
+    "version": 1,
     "refresh": "30s",
     "panels": [
       {
         "id": 1,
-        "title": "Services Status (UP/DOWN)",
+        "title": "Services Health Status",
         "type": "stat",
         "gridPos": {"h": 6, "w": 24, "x": 0, "y": 0},
         "targets": [
           {
-            "expr": "up{job=~\"dev-.*\"}",
+            "expr": "up{job=~\".*service.*\"}",
             "legendFormat": "{{job}}",
             "refId": "A"
           }
@@ -29,26 +29,20 @@
               ]
             },
             "mappings": [
-              {"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}}},
-              {"type": "value", "options": {"1": {"text": "UP", "color": "green"}}}
+              {"type": "value", "options": {"0": {"text": "DOWN"}}},
+              {"type": "value", "options": {"1": {"text": "UP"}}}
             ]
           }
-        },
-        "options": {
-          "colorMode": "background",
-          "graphMode": "none",
-          "justifyMode": "auto",
-          "orientation": "auto"
         }
       },
       {
         "id": 2,
-        "title": "HTTP Request Rate - All Services",
+        "title": "HTTP Request Rate per Service",
         "type": "graph",
         "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
         "targets": [
           {
-            "expr": "sum(rate(http_server_requests_seconds_count{job=~\"dev-.*-service|dev-api-gateway\"}[5m])) by (job)",
+            "expr": "sum(rate(http_server_requests_seconds_count{job=~\".*service.*\"}[5m])) by (job)",
             "legendFormat": "{{job}}",
             "refId": "A"
           }
@@ -60,13 +54,13 @@
       },
       {
         "id": 3,
-        "title": "Response Time p95 - All Services",
+        "title": "HTTP Response Time (P95) per Service",
         "type": "graph",
         "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
         "targets": [
           {
-            "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=~\"dev-.*-service|dev-api-gateway\"}[5m])) by (le, job))",
-            "legendFormat": "{{job}}",
+            "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=~\".*service.*\"}[5m])) by (le, job))",
+            "legendFormat": "{{job}} - p95",
             "refId": "A"
           }
         ],
@@ -77,13 +71,13 @@
       },
       {
         "id": 4,
-        "title": "API Gateway - Traffic",
+        "title": "API Gateway - Request Rate",
         "type": "graph",
         "gridPos": {"h": 8, "w": 8, "x": 0, "y": 14},
         "targets": [
           {
-            "expr": "sum(rate(http_server_requests_seconds_count{job=\"dev-api-gateway\"}[5m])) by (uri, status)",
-            "legendFormat": "{{uri}} [{{status}}]",
+            "expr": "sum(rate(http_server_requests_seconds_count{job=\"dev-api-gateway\"}[5m])) by (uri, method)",
+            "legendFormat": "{{method}} {{uri}}",
             "refId": "A"
           }
         ]
@@ -116,7 +110,7 @@
       },
       {
         "id": 7,
-        "title": "Order Service - Activity",
+        "title": "Order Service - Orders Processed",
         "type": "graph",
         "gridPos": {"h": 8, "w": 8, "x": 0, "y": 22},
         "targets": [
@@ -142,7 +136,7 @@
       },
       {
         "id": 9,
-        "title": "Shipping Service - Activity",
+        "title": "Shipping Service - Shipments",
         "type": "graph",
         "gridPos": {"h": 8, "w": 8, "x": 16, "y": 22},
         "targets": [
@@ -155,40 +149,19 @@
       },
       {
         "id": 10,
-        "title": "Favourite Service - Activity",
+        "title": "JVM Memory Usage by Service",
         "type": "graph",
         "gridPos": {"h": 8, "w": 12, "x": 0, "y": 30},
         "targets": [
           {
-            "expr": "sum(rate(http_server_requests_seconds_count{job=\"dev-favourite-service\"}[5m])) by (uri, status)",
-            "legendFormat": "{{uri}} [{{status}}]",
+            "expr": "sum(jvm_memory_used_bytes{area=\"heap\", job=~\".*service.*\"}) by (job)",
+            "legendFormat": "{{job}} - Heap",
             "refId": "A"
-          }
-        ]
-      },
-      {
-        "id": 11,
-        "title": "Proxy Client - Activity",
-        "type": "graph",
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 30},
-        "targets": [
+          },
           {
-            "expr": "sum(rate(http_server_requests_seconds_count{job=\"dev-proxy-client\"}[5m])) by (uri, status)",
-            "legendFormat": "{{uri}} [{{status}}]",
-            "refId": "A"
-          }
-        ]
-      },
-      {
-        "id": 12,
-        "title": "JVM Memory Usage - All Services",
-        "type": "graph",
-        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 38},
-        "targets": [
-          {
-            "expr": "sum(jvm_memory_used_bytes{area=\"heap\", job=~\"dev-.*\"}) by (job)",
-            "legendFormat": "{{job}} - Heap Used",
-            "refId": "A"
+            "expr": "sum(jvm_memory_max_bytes{area=\"heap\", job=~\".*service.*\"}) by (job)",
+            "legendFormat": "{{job}} - Max",
+            "refId": "B"
           }
         ],
         "yaxes": [
@@ -197,13 +170,13 @@
         ]
       },
       {
-        "id": 13,
-        "title": "CPU Usage - All Services",
+        "id": 11,
+        "title": "CPU Usage by Service",
         "type": "graph",
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 38},
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 30},
         "targets": [
           {
-            "expr": "rate(process_cpu_seconds_total{job=~\"dev-.*\"}[5m]) * 100",
+            "expr": "rate(process_cpu_seconds_total{job=~\".*service.*\"}[5m]) * 100",
             "legendFormat": "{{job}}",
             "refId": "A"
           }
@@ -214,13 +187,13 @@
         ]
       },
       {
-        "id": 14,
-        "title": "HTTP Errors (4xx & 5xx) - All Services",
+        "id": 12,
+        "title": "HTTP Errors by Service (4xx & 5xx)",
         "type": "graph",
-        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 46},
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 38},
         "targets": [
           {
-            "expr": "sum(rate(http_server_requests_seconds_count{job=~\"dev-.*\", status=~\"4..|5..\"}[5m])) by (job, status)",
+            "expr": "sum(rate(http_server_requests_seconds_count{job=~\".*service.*\", status=~\"4..|5..\"}[5m])) by (job, status)",
             "legendFormat": "{{job}} - {{status}}",
             "refId": "A"
           }
@@ -231,10 +204,28 @@
         ]
       },
       {
-        "id": 15,
+        "id": 13,
+        "title": "Database Connection Pool - Active Connections",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 38},
+        "targets": [
+          {
+            "expr": "hikaricp_connections_active{job=~\".*service.*\"}",
+            "legendFormat": "{{job}} - Active",
+            "refId": "A"
+          },
+          {
+            "expr": "hikaricp_connections_max{job=~\".*service.*\"}",
+            "legendFormat": "{{job}} - Max",
+            "refId": "B"
+          }
+        ]
+      },
+      {
+        "id": 14,
         "title": "Service Discovery - Registered Instances",
         "type": "stat",
-        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 54},
+        "gridPos": {"h": 6, "w": 8, "x": 0, "y": 46},
         "targets": [
           {
             "expr": "eureka_server_registry_count",
@@ -244,13 +235,13 @@
         ]
       },
       {
-        "id": 16,
-        "title": "Circuit Breaker State - All Services",
+        "id": 15,
+        "title": "Circuit Breaker State by Service",
         "type": "stat",
-        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 54},
+        "gridPos": {"h": 6, "w": 8, "x": 8, "y": 46},
         "targets": [
           {
-            "expr": "resilience4j_circuitbreaker_state{job=~\"dev-.*\"}",
+            "expr": "resilience4j_circuitbreaker_state{job=~\".*service.*\"}",
             "legendFormat": "{{job}} - {{name}}",
             "refId": "A"
           }
@@ -272,9 +263,68 @@
             ]
           }
         }
+      },
+      {
+        "id": 16,
+        "title": "Thread Pool Usage",
+        "type": "graph",
+        "gridPos": {"h": 6, "w": 8, "x": 16, "y": 46},
+        "targets": [
+          {
+            "expr": "jvm_threads_live_threads{job=~\".*service.*\"}",
+            "legendFormat": "{{job}} - Threads",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 17,
+        "title": "Garbage Collection Time",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 52},
+        "targets": [
+          {
+            "expr": "rate(jvm_gc_pause_seconds_sum{job=~\".*service.*\"}[5m])",
+            "legendFormat": "{{job}} - {{action}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "s", "label": "GC Time"},
+          {"format": "short"}
+        ]
+      },
+      {
+        "id": 18,
+        "title": "Favourite Service - Operations",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 52},
+        "targets": [
+          {
+            "expr": "sum(rate(http_server_requests_seconds_count{job=\"dev-favourite-service\"}[5m])) by (uri, status)",
+            "legendFormat": "{{uri}} [{{status}}]",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 19,
+        "title": "Request Success Rate by Service",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 60},
+        "targets": [
+          {
+            "expr": "sum(rate(http_server_requests_seconds_count{job=~\".*service.*\", status!~\"5..\"}[5m])) by (job) / sum(rate(http_server_requests_seconds_count{job=~\".*service.*\"}[5m])) by (job) * 100",
+            "legendFormat": "{{job}} - Success Rate",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {"format": "percent", "label": "Success Rate %", "min": 0, "max": 100},
+          {"format": "short"}
+        ]
       }
     ]
-  }
+  },
+  "overwrite": true
 }
-
-

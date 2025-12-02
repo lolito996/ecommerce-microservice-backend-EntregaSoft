@@ -1,0 +1,32 @@
+{
+  "family": "dev-prometheus",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::533924338325:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::533924338325:role/ecsTaskExecutionRole",
+  "containerDefinitions": [{
+    "name": "prometheus",
+    "image": "ghcr.io/lolito996/prometheus-dev:subpath-v3",
+    "portMappings": [{"containerPort": 9090, "protocol": "tcp"}],
+    "environment": [
+      {"name": "ENVIRONMENT", "value": "dev"}
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/ecs/dev-prometheus",
+        "awslogs-region": "us-east-1",
+        "awslogs-stream-prefix": "ecs"
+      }
+    },
+    "healthCheck": {
+      "command": ["CMD-SHELL", "wget -q --spider http://localhost:9090/prometheus/-/healthy || exit 1"],
+      "interval": 30,
+      "timeout": 5,
+      "retries": 3,
+      "startPeriod": 60
+    }
+  }]
+}

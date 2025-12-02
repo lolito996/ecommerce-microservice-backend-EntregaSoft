@@ -2,46 +2,53 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
-    cluster: 'microservices-ecs'
-    environment: 'dev'
+    cluster: 'ecommerce-dev-ecs'
+    environment: 'development'
 
 scrape_configs:
   - job_name: 'prometheus'
+    metrics_path: '/prometheus/metrics'
     static_configs:
       - targets: ['localhost:9090']
-
-  - job_name: 'cloud-config'
+  
+  - job_name: 'dev-api-gateway'
     metrics_path: '/actuator/prometheus'
     static_configs:
-      - targets: ['10.0.20.66:8888']
-        labels:
-          service: 'cloud-config'
-          environment: 'dev'
-  - job_name: 'proxy-client'
-    metrics_path: '/actuator/prometheus'
-    static_configs:
-      - targets: ['10.0.20.250:8087']
-        labels:
-          service: 'proxy-client'
-          environment: 'dev'
-  - job_name: 'api-gateway'
-    metrics_path: '/actuator/prometheus'
-    static_configs:
-      - targets: ['10.0.10.111:8080']
+      - targets: ['10.0.10.185:8080']
         labels:
           service: 'api-gateway'
           environment: 'dev'
-  - job_name: 'user-service'
+  
+  - job_name: 'dev-proxy-client'
     metrics_path: '/actuator/prometheus'
     static_configs:
-      - targets: ['10.0.20.249:8081']
+      - targets: ['10.0.20.124:8087']
         labels:
-          service: 'user-service'
+          service: 'proxy-client'
           environment: 'dev'
-  - job_name: 'service-discovery'
+  
+  - job_name: 'dev-service-discovery'
     metrics_path: '/actuator/prometheus'
     static_configs:
-      - targets: ['10.0.10.5:8761']
+      - targets: ['10.0.10.96:8761']
         labels:
           service: 'service-discovery'
           environment: 'dev'
+  
+  - job_name: 'dev-cloud-config'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['10.0.20.66:9296']
+        labels:
+          service: 'cloud-config'
+          environment: 'dev'
+  
+  - job_name: 'dev-favourite-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['10.0.20.232:8086']
+        labels:
+          service: 'favourite-service'
+          environment: 'dev'
+          
+
