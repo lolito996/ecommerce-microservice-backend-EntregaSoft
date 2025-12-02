@@ -7,10 +7,13 @@
 3. [Microservicios Implementados](#microservicios-implementados)
 4. [Stack Tecnológico](#stack-tecnológico)
 5. [Estrategia CI/CD](#estrategia-cicd)
-6. [Estrategia de Testing](#estrategia-de-testing)
-7. [Análisis de Métricas de Rendimiento](#análisis-de-métricas-de-rendimiento)
-8. [Oportunidades de Mejora](#oportunidades-de-mejora)
-9. [Diagramas de Arquitectura](#diagramas-de-arquitectura)
+6. [Análisis de Calidad de Código: SonarQube](#-análisis-de-calidad-de-código-sonarqube)
+7. [Escaneo de Vulnerabilidades: Trivy](#-escaneo-de-vulnerabilidades-trivy)
+8. [Despliegue con Helm](#-despliegue-con-helm)
+9. [Estrategia de Testing](#estrategia-de-testing)
+10. [Análisis de Métricas de Rendimiento](#análisis-de-métricas-de-rendimiento)
+11. [Oportunidades de Mejora](#oportunidades-de-mejora)
+12. [Diagramas de Arquitectura](#diagramas-de-arquitectura)
 
 ---
 
@@ -34,8 +37,12 @@ Este proyecto es una **plataforma de e-commerce backend** construida bajo una ar
 - 11 microservicios core operativos
 - Pipeline CI/CD completo (Jenkins + GitHub Actions)
 - Tests unitarios, E2E y de rendimiento
-- Despliegue automatizado en Kubernetes (Kind)
-- Monitoreo con Zipkin y Prometheus
+- Despliegue automatizado en Kubernetes (Kind) con Helm
+- Monitoreo completo con Prometheus, Grafana y Zipkin
+- Análisis de código con SonarQube
+- Escaneo de vulnerabilidades con Trivy
+- Patrones de resiliencia (Circuit Breaker, Retry, Bulkhead)
+- Feature Toggles para configuración dinámica
 
 ---
 
@@ -58,7 +65,9 @@ Cliente → API Gateway → Service Discovery → Microservicios → Bases de Da
                 ↓
             Zipkin (Tracing)
                 ↓
-         Prometheus (Métricas)
+         Prometheus (Métricas) → Grafana (Dashboards)
+                ↓
+         SonarQube (Code Quality) + Trivy (Security)
 ```
 
 ### Principios de Diseño Aplicados
@@ -68,6 +77,43 @@ Cliente → API Gateway → Service Discovery → Microservicios → Bases de Da
 - **Stateless**: Los servicios no mantienen estado de sesión
 - **Database per Service**: Cada servicio tiene su propia base de datos
 - **Event-Driven**: Comunicación asíncrona cuando es necesario
+
+### Patrones de Diseño Implementados
+
+#### 1. **Patrón de Resiliencia (Circuit Breaker + Retry + Bulkhead)**
+- **Implementación**: Resilience4j en todos los clientes HTTP entre microservicios
+- **Servicios afectados**: `UserServiceClient`, `OrderServiceClient`, `ProductServiceClient` en todos los servicios
+- **Características**:
+  - **Circuit Breaker**: Protege contra fallos en cascada, abre el circuito cuando hay demasiados fallos
+  - **Retry**: Reintentos automáticos con backoff exponencial (3 intentos por defecto)
+  - **Bulkhead**: Aislamiento de recursos, limita llamadas concurrentes (10 por defecto)
+- **Configuración**: Por servicio en `application.yml` con thresholds personalizables
+- **Ejemplo**: `order-service` protege sus llamadas al `user-service` con fallback automático
+
+#### 2. **Patrón de Configuración / Feature Toggle**
+- **Implementación**: `AppFeatureProperties` en cada servicio
+- **Características**:
+  - Habilitar/deshabilitar "enriquecimiento remoto" sin redeploy
+  - Control de logs de resiliencia
+  - Configuración centralizada vía Spring Cloud Config
+- **Beneficios**: Cambios de comportamiento sin modificar código, A/B testing, rollback rápido
+
+#### 3. **Patrón Adapter para Integración**
+- **Implementación**: Clientes dedicados (`*ServiceClient`) en cada servicio
+- **Características**:
+  - Encapsulación de URLs y endpoints
+  - Manejo centralizado de errores
+  - Integración con patrones de resiliencia
+  - Facilita testing y mockeo
+- **Beneficios**: Desacoplamiento, fácil reemplazo de proveedores, código de negocio limpio
+
+#### 4. **Patrón Service Discovery**
+- **Implementación**: Eureka Server centralizado
+- **Características**: Auto-registro, health checks, load balancing automático
+
+#### 5. **Patrón API Gateway**
+- **Implementación**: Spring Cloud Gateway
+- **Características**: Punto de entrada único, enrutamiento dinámico, CORS, circuit breaker integration
 
 ---
 
@@ -169,18 +215,23 @@ Cliente → API Gateway → Service Discovery → Microservicios → Bases de Da
 - **SpringDoc OpenAPI**: Documentación de APIs
 
 ### Infraestructura
-- **Docker**: Containerización
-- **Kubernetes (Kind)**: Orquestación de contenedores
+- **Docker**: Containerización de todos los servicios
+- **Kubernetes (Kind)**: Orquestación de contenedores para desarrollo y testing
+- **Helm**: Gestión de despliegues en Kubernetes (charts reutilizables)
 - **Maven**: Gestión de dependencias y build
 - **Eureka**: Service discovery
 - **Zipkin**: Distributed tracing
-- **Prometheus**: Métricas y monitoreo
+- **Prometheus**: Métricas y monitoreo (scraping de todos los servicios)
+- **Grafana**: Dashboards y visualización de métricas
 
 ### CI/CD
 - **Jenkins**: Pipeline de CI/CD principal
 - **GitHub Actions**: CI/CD para workflows específicos
 - **Docker Hub**: Registro de imágenes
 - **Kubectl**: Gestión de Kubernetes
+- **Helm**: Despliegue automatizado en Kubernetes
+- **SonarQube/SonarCloud**: Análisis de calidad de código
+- **Trivy**: Escaneo de vulnerabilidades en imágenes Docker
 
 ### Testing
 - **JUnit 5**: Framework de testing
@@ -259,6 +310,156 @@ El proyecto implementa una estrategia híbrida de CI/CD para maximizar la flexib
 - ✅ **Jenkins**: Pipeline completo, control granular, integración con infraestructura propia
 - ✅ **GitHub Actions**: Tests rápidos, feedback inmediato, integración nativa con GitHub
 - ✅ **Redundancia**: Si un sistema falla, el otro puede continuar
+
+---
+
+### 🔍 Análisis de Calidad de Código: SonarQube
+
+**Ubicación**: `.github/workflows/sonarqube-analysis.yml`
+
+**Características**:
+- Análisis automático en push y pull requests a `main`/`master`
+- Integración con SonarCloud (cloud-hosted)
+- Quality Gate check automático
+- Reportes de cobertura de código (JaCoCo)
+- Detección de code smells, bugs y vulnerabilidades
+- Integración con GitHub para comentarios en PRs
+
+**Configuración**:
+- **Secrets Requeridos**:
+  - `SONAR_TOKEN`: Token de autenticación de SonarCloud
+  - `SONAR_ORGANIZATION`: Organización en SonarCloud
+  - `SONAR_PROJECT_KEY`: Clave del proyecto (opcional)
+  - `SONAR_HOST_URL`: URL de SonarCloud (default: `https://sonarcloud.io`)
+
+**Proceso**:
+1. Build del proyecto con tests y cobertura (JaCoCo)
+2. Análisis con SonarQube Maven plugin
+3. Quality Gate check automático
+4. Reportes disponibles en SonarCloud dashboard
+
+**Métricas Analizadas**:
+- Cobertura de código
+- Duplicación de código
+- Code smells
+- Bugs y vulnerabilidades
+- Deuda técnica
+- Mantenibilidad
+
+**Retry Logic**: Implementado para manejar errores transitorios de red (hasta 3 intentos)
+
+---
+
+### 🔒 Escaneo de Vulnerabilidades: Trivy
+
+**Ubicación**: `.github/workflows/trivy-scan.yml`
+
+**Características**:
+- Escaneo automático de todas las imágenes Docker
+- Ejecución en paralelo para todos los microservicios (matrix strategy)
+- Escaneo programado semanal (domingos a medianoche)
+- Integración con GitHub Security tab
+- Reportes en formato SARIF y tabla
+
+**Servicios Escaneados**:
+- user-service, product-service, order-service
+- shipping-service, payment-service, favourite-service
+- api-gateway, service-discovery, cloud-config, proxy-client
+
+**Proceso**:
+1. Build del proyecto Maven
+2. Construcción de imagen Docker
+3. Escaneo con Trivy (CRITICAL y HIGH severity)
+4. Generación de reporte SARIF
+5. Upload a GitHub Security tab
+6. Reporte en formato tabla en logs
+
+**Niveles de Severidad**:
+- `CRITICAL`: Acción inmediata requerida
+- `HIGH`: Debe abordarse pronto
+- `MEDIUM`: Considerar abordar
+- `LOW`: Baja prioridad
+
+**Integración**:
+- **GitHub Security**: Reportes SARIF visibles en Security tab
+- **Jenkins**: Escaneo automático después de build de imágenes
+- **Workflows de Servicios**: Trivy incluido en cada pipeline de servicio
+
+---
+
+### 📦 Despliegue con Helm
+
+**Ubicación**: `helm/`
+
+**Estructura**:
+```
+helm/
+├── ecommerce-microservices/    # Chart principal (umbrella chart)
+│   ├── Chart.yaml
+│   ├── values.yaml              # Valores por defecto
+│   ├── values-dev.yaml          # Desarrollo
+│   ├── values-staging.yaml      # Staging
+│   ├── values-prod.yaml         # Producción
+│   └── templates/               # Templates Kubernetes
+└── microservice/                # Chart genérico reutilizable
+    ├── Chart.yaml
+    ├── values.yaml
+    └── templates/
+```
+
+**Características**:
+- **Chart Umbrella**: Despliega todos los servicios en un solo comando
+- **Chart Genérico**: Template reutilizable para microservicios
+- **Multi-ambiente**: Configuraciones separadas para dev, staging y prod
+- **Configuración Centralizada**: ConfigMap compartido para todos los servicios
+- **Health Checks**: Readiness y liveness probes configurados
+- **Recursos Configurables**: Requests y limits por servicio
+- **Escalado**: Replicas configurables por servicio
+
+**Servicios Incluidos**:
+- Core: service-discovery, cloud-config, api-gateway
+- Business: user-service, product-service, order-service, payment-service, shipping-service, favourite-service, proxy-client
+- Monitoring: prometheus, grafana, zipkin
+
+**Comandos Principales**:
+
+```bash
+# Instalación en desarrollo
+helm install ecommerce-microservices ./helm/ecommerce-microservices \
+  --namespace dev \
+  --create-namespace \
+  --values ./helm/ecommerce-microservices/values-dev.yaml \
+  --set global.registry=your-registry \
+  --set global.imageTag=latest
+
+# Actualización
+helm upgrade ecommerce-microservices ./helm/ecommerce-microservices \
+  --namespace <namespace> \
+  --values ./helm/ecommerce-microservices/values-<env>.yaml
+
+# Desinstalación
+helm uninstall ecommerce-microservices --namespace <namespace>
+```
+
+**Scripts de Automatización**:
+- `helm/deploy.ps1`: Script PowerShell para despliegue completo
+  - Setup de cluster Kind
+  - Build de imágenes
+  - Carga a Kind
+  - Despliegue con Helm
+- `helm/install.ps1`: Script para instalación de Helm chart
+
+**Configuración por Ambiente**:
+- **Dev**: NodePort para acceso directo, recursos mínimos
+- **Staging**: NodePort, recursos intermedios
+- **Prod**: ClusterIP con Ingress recomendado, recursos optimizados
+
+**Puertos Externos (NodePort)**:
+- API Gateway: 30000
+- Service Discovery: 30001
+- Prometheus: 30090
+- Grafana: 30300
+- Zipkin: 30411
 
 ---
 
@@ -802,21 +1003,37 @@ class EcommerceUser(HttpUser):
 
 ---
 
-### 2. **Observabilidad y Monitoreo** 🔥 ALTA PRIORIDAD
+### 2. **Observabilidad y Monitoreo** ✅ IMPLEMENTADO
 
-#### 2.1 Dashboard de Métricas (Grafana)
-- **Problema**: No hay visualización centralizada de métricas
-- **Solución**: Implementar Grafana con Prometheus
-- **Impacto**: Visibilidad completa del sistema
-- **Esfuerzo**: Medio (1-2 semanas)
+#### 2.1 Dashboard de Métricas (Grafana) ✅
+- **Estado**: ✅ **Implementado y Funcional**
+- **Implementación**: 
+  - Prometheus scraping todos los servicios vía `/actuator/prometheus`
+  - Grafana con datasource automático de Prometheus
+  - Dashboard básico pre-configurado
+  - Provisioning automático de datasources y dashboards
+- **Ubicación**: 
+  - Docker Compose: `monitoring/grafana/`
+  - Kubernetes: Incluido en Helm chart
+- **Acceso**: 
+  - Docker Compose: `http://localhost:3000` (admin/admin)
+  - Kubernetes: NodePort 30300
+- **Características**:
+  - Scraping automático cada 15 segundos
+  - Métricas de Spring Boot Actuator
+  - Métricas de Resilience4j (circuit breakers, retries, bulkheads)
+  - Métricas de JVM (memoria, CPU, threads)
+  - Métricas HTTP (requests, latencia, errores)
 
-#### 2.2 Alertas Automáticas
-- **Problema**: No hay alertas proactivas de problemas
-- **Solución**: Configurar alertas en Prometheus/Alertmanager
-- **Métricas clave**:
+#### 2.2 Alertas Automáticas ⚠️ PENDIENTE
+- **Estado**: ⚠️ **Pendiente de Implementación**
+- **Solución**: Configurar Alertmanager con Prometheus
+- **Métricas clave a monitorear**:
   - Tasa de error > 1%
   - Latencia P95 > 200ms
   - Disponibilidad < 99.9%
+  - Circuit breaker abierto
+  - Uso de memoria > 80%
 - **Impacto**: Detección temprana de problemas
 - **Esfuerzo**: Bajo-Medio (1 semana)
 
@@ -857,6 +1074,8 @@ class EcommerceUser(HttpUser):
 - **Solución**: Implementar retry con exponential backoff
 - **Impacto**: Mayor resiliencia ante fallos temporales
 - **Esfuerzo**: Bajo-Medio (1 semana)
+
+**Nota**: Ya implementado con Resilience4j en los ServiceClients
 
 #### 4.2 Health Checks Avanzados
 - **Problema**: Health checks básicos pueden no detectar problemas reales
@@ -961,6 +1180,8 @@ class EcommerceUser(HttpUser):
 
 ## 📐 Diagramas de Arquitectura
 
+> 📖 **Documentación Completa de Diagramas**: Para diagramas más detallados y específicos, consulta [docs/ARCHITECTURE_DIAGRAMS.md](docs/ARCHITECTURE_DIAGRAMS.md)
+
 ### 1. Arquitectura General del Sistema
 
 ```mermaid
@@ -981,7 +1202,8 @@ graph TB
     subgraph "Config & Monitoring"
         Config[Cloud Config Server<br/>:9296]
         Zipkin[Zipkin<br/>:9411]
-        Prometheus[Prometheus]
+        Prometheus[Prometheus<br/>:9090]
+        Grafana[Grafana<br/>:3000]
     end
     
     subgraph "Business Services"
@@ -1043,6 +1265,11 @@ graph TB
     User --> Prometheus
     Product --> Prometheus
     Order --> Prometheus
+    Shipping --> Prometheus
+    Payment --> Prometheus
+    Favourite --> Prometheus
+    
+    Prometheus --> Grafana
 ```
 
 ---
@@ -1057,7 +1284,7 @@ graph LR
     
     subgraph "CI/CD Tools"
         Jenkins[Jenkins Pipeline]
-        GHA[GitHub Actions]
+        GHA[GitHub Actions<br/>SonarQube + Trivy]
     end
     
     subgraph "Build & Test"
@@ -1070,6 +1297,15 @@ graph LR
     
     subgraph "Container Registry"
         DockerHub[Docker Hub<br/>gersondj/*]
+    end
+    
+    subgraph "Quality & Security"
+        SonarQube[SonarQube<br/>Code Analysis]
+        Trivy[Trivy<br/>Vulnerability Scan]
+    end
+    
+    subgraph "Deployment"
+        Helm[Helm Charts<br/>Kubernetes]
     end
     
     subgraph "Kubernetes"
@@ -1088,8 +1324,11 @@ graph LR
     Int --> E2E
     E2E --> Perf
     
+    Build --> SonarQube
+    Build --> Trivy
     Build --> DockerHub
-    DockerHub --> Staging
+    DockerHub --> Helm
+    Helm --> Staging
     Staging --> Prod
 ```
 
@@ -1181,8 +1420,8 @@ graph TB
     end
     
     subgraph "Metrics"
-        Prometheus[Prometheus<br/>Metrics Collection]
-        Grafana[Grafana<br/>Dashboards]
+        Prometheus[Prometheus<br/>Metrics Collection<br/>Scraping: 15s]
+        Grafana[Grafana<br/>Dashboards<br/>Auto-provisioned]
     end
     
     subgraph "Logging"
@@ -1205,6 +1444,355 @@ graph TB
 
 ---
 
+### 6. Arquitectura de Despliegue en Kubernetes
+
+```mermaid
+graph TB
+    subgraph "External Access"
+        Internet[Internet]
+        Ingress[Ingress Controller<br/>Nginx/Traefik]
+    end
+    
+    subgraph "Kubernetes Cluster"
+        subgraph "Namespace: microservices"
+            subgraph "Core Services"
+                EurekaDeploy[Service Discovery<br/>Deployment<br/>Dev: 1, Staging: 1, Prod: 2<br/>NodePort: 30001]
+                ConfigDeploy[Cloud Config<br/>Deployment<br/>Dev: 1, Prod: 2]
+                GatewayDeploy[API Gateway<br/>Deployment<br/>Dev: 1, Staging: 2, Prod: 3<br/>NodePort: 30000]
+            end
+            
+            subgraph "Business Services"
+                UserDeploy[User Service<br/>Deployment<br/>Dev: 1, Staging: 2, Prod: 3]
+                ProductDeploy[Product Service<br/>Deployment<br/>Dev: 1, Staging: 2, Prod: 3]
+                OrderDeploy[Order Service<br/>Deployment<br/>Dev: 1, Staging: 2, Prod: 3]
+                PaymentDeploy[Payment Service<br/>Deployment<br/>Dev: 1, Prod: 3]
+                ShippingDeploy[Shipping Service<br/>Deployment<br/>Dev: 1, Prod: 2]
+                FavouriteDeploy[Favourite Service<br/>Deployment<br/>Dev: 1, Prod: 2]
+                ProxyDeploy[Proxy Client<br/>Deployment<br/>Dev: 1, Prod: 2]
+            end
+            
+            subgraph "Monitoring Services"
+                PrometheusDeploy[Prometheus<br/>Deployment<br/>Replicas: 1]
+                GrafanaDeploy[Grafana<br/>Deployment<br/>Replicas: 1]
+                ZipkinDeploy[Zipkin<br/>Deployment<br/>Replicas: 1]
+            end
+            
+            subgraph "Services (ClusterIP/NodePort)"
+                EurekaSvc[Service Discovery<br/>Service<br/>NodePort: 30001]
+                GatewaySvc[API Gateway<br/>Service<br/>NodePort: 30000]
+                PrometheusSvc[Prometheus<br/>Service<br/>NodePort: 30090]
+                GrafanaSvc[Grafana<br/>Service<br/>NodePort: 30300]
+                ZipkinSvc[Zipkin<br/>Service<br/>NodePort: 30411]
+            end
+            
+            subgraph "ConfigMap"
+                ConfigMap[Micro Config<br/>Shared ConfigMap]
+            end
+        end
+        
+        subgraph "Data Layer"
+            subgraph "StatefulSets / External DBs"
+                UserDB[(User DB<br/>MySQL<br/>StatefulSet)]
+                ProductDB[(Product DB<br/>MySQL<br/>StatefulSet)]
+                OrderDB[(Order DB<br/>MySQL<br/>StatefulSet)]
+                PaymentDB[(Payment DB<br/>MySQL<br/>StatefulSet)]
+                ShippingDB[(Shipping DB<br/>MySQL<br/>StatefulSet)]
+                FavouriteDB[(Favourite DB<br/>MySQL<br/>StatefulSet)]
+            end
+        end
+    end
+    
+    Internet --> Ingress
+    Ingress --> GatewaySvc
+    GatewaySvc --> GatewayDeploy
+    
+    GatewayDeploy --> EurekaSvc
+    GatewayDeploy --> UserDeploy
+    GatewayDeploy --> ProductDeploy
+    GatewayDeploy --> OrderDeploy
+    GatewayDeploy --> PaymentDeploy
+    GatewayDeploy --> ShippingDeploy
+    GatewayDeploy --> FavouriteDeploy
+    GatewayDeploy --> ProxyDeploy
+    
+    UserDeploy --> EurekaSvc
+    ProductDeploy --> EurekaSvc
+    OrderDeploy --> EurekaSvc
+    PaymentDeploy --> EurekaSvc
+    ShippingDeploy --> EurekaSvc
+    FavouriteDeploy --> EurekaSvc
+    ProxyDeploy --> EurekaSvc
+    
+    UserDeploy --> ConfigDeploy
+    ProductDeploy --> ConfigDeploy
+    OrderDeploy --> ConfigDeploy
+    PaymentDeploy --> ConfigDeploy
+    ShippingDeploy --> ConfigDeploy
+    FavouriteDeploy --> ConfigDeploy
+    
+    UserDeploy --> ConfigMap
+    ProductDeploy --> ConfigMap
+    OrderDeploy --> ConfigMap
+    
+    UserDeploy --> UserDB
+    ProductDeploy --> ProductDB
+    OrderDeploy --> OrderDB
+    PaymentDeploy --> PaymentDB
+    ShippingDeploy --> ShippingDB
+    FavouriteDeploy --> FavouriteDB
+    
+    UserDeploy --> ZipkinSvc
+    ProductDeploy --> ZipkinSvc
+    OrderDeploy --> ZipkinSvc
+    ShippingDeploy --> ZipkinSvc
+    
+    UserDeploy --> PrometheusSvc
+    ProductDeploy --> PrometheusSvc
+    OrderDeploy --> PrometheusSvc
+    ShippingDeploy --> PrometheusSvc
+    PaymentDeploy --> PrometheusSvc
+    FavouriteDeploy --> PrometheusSvc
+    
+    PrometheusSvc --> GrafanaSvc
+```
+
+---
+
+### 7. Flujo de Despliegue con Helm
+
+```mermaid
+graph TB
+    subgraph "Desarrollo"
+        Dev[Developer]
+        Git[Git Repository<br/>GitHub]
+    end
+    
+    subgraph "CI/CD Pipeline"
+        Jenkins[Jenkins Pipeline]
+        GHA[GitHub Actions]
+        Build[Maven Build]
+        Test[Tests Unitarios<br/>+ Integración]
+        DockerBuild[Docker Build]
+        DockerPush[Docker Push<br/>Docker Hub]
+    end
+    
+    subgraph "Helm Chart"
+        HelmChart[Helm Chart<br/>ecommerce-microservices]
+        Values[values.yaml<br/>values-dev.yaml<br/>values-staging.yaml<br/>values-prod.yaml]
+    end
+    
+    subgraph "Kubernetes Cluster"
+        subgraph "Namespace: dev"
+            DevDeploy[Deployment Dev<br/>NodePort]
+        end
+        
+        subgraph "Namespace: staging"
+            StagingDeploy[Deployment Staging<br/>NodePort]
+        end
+        
+        subgraph "Namespace: production"
+            ProdDeploy[Deployment Production<br/>ClusterIP + Ingress]
+        end
+    end
+    
+    subgraph "Monitoring"
+        Prometheus[Prometheus<br/>Scraping]
+        Grafana[Grafana<br/>Dashboards]
+    end
+    
+    Dev --> Git
+    Git --> Jenkins
+    Git --> GHA
+    
+    Jenkins --> Build
+    GHA --> Build
+    
+    Build --> Test
+    Test --> DockerBuild
+    DockerBuild --> DockerPush
+    
+    DockerPush --> HelmChart
+    HelmChart --> Values
+    
+    Values --> DevDeploy
+    Values --> StagingDeploy
+    Values --> ProdDeploy
+    
+    DevDeploy --> Prometheus
+    StagingDeploy --> Prometheus
+    ProdDeploy --> Prometheus
+    
+    Prometheus --> Grafana
+```
+
+---
+
+### 8. Arquitectura de Red y Comunicación
+
+```mermaid
+graph TB
+    subgraph "External Network"
+        Client[Cliente<br/>Browser/Mobile]
+    end
+    
+    subgraph "Kubernetes Cluster Network"
+        subgraph "Ingress Layer"
+            Ingress[Ingress Controller<br/>Nginx/Traefik<br/>Port: 80/443]
+        end
+        
+        subgraph "API Gateway Layer"
+            GatewaySvc[API Gateway Service<br/>ClusterIP<br/>Port: 8080]
+            GatewayPod1[API Gateway Pod 1]
+            GatewayPod2[API Gateway Pod 2]
+        end
+        
+        subgraph "Service Discovery Layer"
+            EurekaSvc[Eureka Service<br/>ClusterIP<br/>Port: 8761]
+            EurekaPod[Eureka Pod]
+        end
+        
+        subgraph "Business Services Layer"
+            UserSvc[User Service<br/>ClusterIP: 8700]
+            ProductSvc[Product Service<br/>ClusterIP: 8500]
+            OrderSvc[Order Service<br/>ClusterIP: 8300]
+            PaymentSvc[Payment Service<br/>ClusterIP: 8400]
+            ShippingSvc[Shipping Service<br/>ClusterIP: 8600]
+            FavouriteSvc[Favourite Service<br/>ClusterIP: 8800]
+        end
+        
+        subgraph "Monitoring Layer"
+            PrometheusSvc[Prometheus<br/>ClusterIP: 9090]
+            GrafanaSvc[Grafana<br/>ClusterIP: 3000]
+            ZipkinSvc[Zipkin<br/>ClusterIP: 9411]
+        end
+        
+        subgraph "Data Layer"
+            UserDB[(User DB<br/>MySQL: 3306)]
+            ProductDB[(Product DB<br/>MySQL: 3306)]
+            OrderDB[(Order DB<br/>MySQL: 3306)]
+        end
+    end
+    
+    Client -->|HTTPS:443| Ingress
+    Ingress -->|HTTP:8080| GatewaySvc
+    GatewaySvc --> GatewayPod1
+    GatewaySvc --> GatewayPod2
+    
+    GatewayPod1 -->|Service Discovery| EurekaSvc
+    GatewayPod2 -->|Service Discovery| EurekaSvc
+    EurekaSvc --> EurekaPod
+    
+    GatewayPod1 -->|Load Balanced| UserSvc
+    GatewayPod1 -->|Load Balanced| ProductSvc
+    GatewayPod1 -->|Load Balanced| OrderSvc
+    GatewayPod2 -->|Load Balanced| UserSvc
+    GatewayPod2 -->|Load Balanced| ProductSvc
+    
+    UserSvc -->|JDBC| UserDB
+    ProductSvc -->|JDBC| ProductDB
+    OrderSvc -->|JDBC| OrderDB
+    
+    UserSvc -->|HTTP| PrometheusSvc
+    ProductSvc -->|HTTP| PrometheusSvc
+    OrderSvc -->|HTTP| PrometheusSvc
+    
+    UserSvc -->|HTTP| ZipkinSvc
+    ProductSvc -->|HTTP| ZipkinSvc
+    OrderSvc -->|HTTP| ZipkinSvc
+    
+    PrometheusSvc -->|Query| GrafanaSvc
+```
+
+---
+
+### 9. Arquitectura de Resiliencia (Circuit Breaker Pattern)
+
+```mermaid
+graph TB
+    subgraph "Order Service"
+        OrderController[Order Controller]
+        OrderService[Order Service]
+        UserClient[UserServiceClient<br/>@CircuitBreaker<br/>@Retry<br/>@Bulkhead]
+    end
+    
+    subgraph "Resilience4j"
+        CircuitBreaker[Circuit Breaker<br/>Failure Rate: 50%<br/>Min Calls: 5<br/>Wait Duration: 5s]
+        Retry[Retry<br/>Max Attempts: 3<br/>Wait: 500ms]
+        Bulkhead[Bulkhead<br/>Max Concurrent: 10<br/>Max Wait: 1s]
+    end
+    
+    subgraph "User Service"
+        UserController[User Controller]
+        UserService[User Service]
+    end
+    
+    subgraph "Fallback"
+        FallbackMethod[fallbackUser Method<br/>Returns: N/A User]
+    end
+    
+    OrderController --> OrderService
+    OrderService --> UserClient
+    
+    UserClient --> CircuitBreaker
+    CircuitBreaker --> Retry
+    Retry --> Bulkhead
+    
+    Bulkhead -->|Success| UserController
+    Bulkhead -->|Failure| FallbackMethod
+    
+    UserController --> UserService
+    
+    FallbackMethod -->|Returns| OrderService
+    
+    style CircuitBreaker fill:#ff9999
+    style Retry fill:#99ccff
+    style Bulkhead fill:#99ff99
+    style FallbackMethod fill:#ffcc99
+```
+
+---
+
+### 10. Flujo de Despliegue Detallado con Helm
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant Git as Git Repository
+    participant CI as CI/CD Pipeline
+    participant DockerHub as Docker Hub
+    participant Helm as Helm Chart
+    participant K8s as Kubernetes Cluster
+    participant Prom as Prometheus
+    participant Graf as Grafana
+    
+    Dev->>Git: git push
+    Git->>CI: Trigger Pipeline
+    CI->>CI: Build & Test
+    CI->>DockerHub: Build & Push Images
+    CI->>Helm: Package Chart
+    
+    Dev->>Helm: helm install/upgrade
+    Helm->>K8s: Create Namespace
+    Helm->>K8s: Create ConfigMap
+    Helm->>K8s: Deploy Service Discovery
+    Helm->>K8s: Deploy Cloud Config
+    Helm->>K8s: Deploy API Gateway
+    Helm->>K8s: Deploy Business Services
+    Helm->>K8s: Deploy Monitoring (Prometheus, Grafana, Zipkin)
+    
+    K8s->>K8s: Pull Images from DockerHub
+    K8s->>K8s: Start Pods
+    K8s->>K8s: Health Checks (Readiness/Liveness)
+    K8s->>K8s: Register Services in Eureka
+    
+    K8s->>Prom: Expose Metrics (/actuator/prometheus)
+    Prom->>Prom: Scrape Metrics (every 15s)
+    Prom->>Graf: Provide Metrics
+    Graf->>Dev: Display Dashboards
+```
+
+---
+
 ## 📝 Resumen Ejecutivo
 
 ### Estado Actual
@@ -1214,6 +1802,12 @@ graph TB
 - 100% de disponibilidad en tests de rendimiento
 - Latencia promedio excelente (26.52 ms)
 - Pipeline CI/CD completo y funcional
+- **Despliegue con Helm**: Charts completos para Kubernetes
+- **Monitoreo Completo**: Prometheus + Grafana implementados
+- **Calidad de Código**: SonarQube integrado en CI/CD
+- **Seguridad**: Trivy escaneando todas las imágenes Docker
+- **Patrones de Resiliencia**: Circuit Breaker, Retry y Bulkhead implementados
+- **Feature Toggles**: Configuración dinámica sin redeploy
 
 ### Métricas Clave
 
@@ -1229,22 +1823,25 @@ graph TB
 ### Próximos Pasos Recomendados
 
 1. **Corto Plazo (1-2 meses)**
+   - ✅ Dashboard de métricas (Grafana) - **COMPLETADO**
    - Implementar cache (Redis)
    - Optimizar queries SQL en Shipping Service
    - Implementar autenticación (OAuth2/JWT)
-   - Dashboard de métricas (Grafana)
+   - Configurar alertas en Prometheus/Alertmanager
 
 2. **Medio Plazo (3-6 meses)**
    - Event-driven architecture
-   - Canary deployments
+   - Canary deployments con Helm
    - Logging centralizado (ELK)
-   - Aumentar cobertura de tests
+   - Aumentar cobertura de tests (>80%)
+   - Mejorar dashboards de Grafana con métricas avanzadas
 
 3. **Largo Plazo (6-12 meses)**
    - CQRS implementation
-   - Auto-scaling avanzado
+   - Auto-scaling avanzado (HPA con métricas de Prometheus)
    - Multi-region deployment
    - Advanced monitoring y alerting
+   - Service Mesh (Istio/Linkerd)
 
 ---
 
@@ -1260,5 +1857,8 @@ graph TB
 
 **Documento generado el**: 3 de noviembre de 2025
 **Versión del Proyecto**: 0.1.0
-**Última actualización**: Basado en ejecución de performance tests del 3/11/2025
+**Última actualización**: Diciembre 2024
+**Incluye**: Helm, SonarQube, Trivy, Prometheus, Grafana, Patrones de Resiliencia
 
+---
+**Nota**: Este documento refleja la arquitectura y configuración actualmente implementada en el proyecto.
